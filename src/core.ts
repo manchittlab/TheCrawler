@@ -12,6 +12,9 @@ export interface ScraperInput {
     extractEmails?: boolean;
     extractPhones?: boolean;
     extractMarkdown?: boolean;
+    stripBoilerplate?: boolean;
+    chunkSize?: number;
+    chunkOverlap?: number;
     cssSelector?: string;
     maxDepth?: number;
     maxPages?: number;
@@ -40,6 +43,7 @@ export interface PageData {
     phones: string[];
     socialLinks: string[];
     markdown: string | null;
+    chunks: { text: string; index: number; section: string | null; charCount: number; hash: string }[] | null;
     selectedContent: string | null;
     statusCode: number;
     contentType: string | null;
@@ -49,6 +53,44 @@ export interface PageData {
     scrapedAt: string;
     status: 'success' | 'error';
     error: string | null;
+}
+
+import { createHash } from 'node:crypto';
+
+function chunkText(text: string, chunkSize: number, overlap: number): { text: string; index: number; section: string | null; charCount: number; hash: string }[] {
+    if (!text || chunkSize <= 0) return [];
+    const chunks: { text: string; index: number; section: string | null; charCount: number; hash: string }[] = [];
+
+    // Split by heading boundaries for heading-aware chunking
+    const sections = text.split(/(?=^#{1,3}\s)/m);
+    let currentChunk = '';
+    let chunkIndex = 0;
+    let currentSection: string | null = null;
+
+    for (const section of sections) {
+        // Extract section heading
+        const headingMatch = section.match(/^(#{1,3})\s+(.+)/);
+        if (headingMatch) currentSection = headingMatch[2].trim();
+
+        if (currentChunk.length + section.length > chunkSize && currentChunk.length > 0) {
+            // Emit current chunk
+            const hash = createHash('md5').update(currentChunk).digest('hex').slice(0, 12);
+            chunks.push({ text: currentChunk.trim(), index: chunkIndex++, section: currentSection, charCount: currentChunk.trim().length, hash });
+
+            // Keep overlap from end of current chunk
+            currentChunk = overlap > 0 ? currentChunk.slice(-overlap) + section : section;
+        } else {
+            currentChunk += section;
+        }
+    }
+
+    // Emit remaining
+    if (currentChunk.trim()) {
+        const hash = createHash('md5').update(currentChunk).digest('hex').slice(0, 12);
+        chunks.push({ text: currentChunk.trim(), index: chunkIndex, section: currentSection, charCount: currentChunk.trim().length, hash });
+    }
+
+    return chunks;
 }
 
 function matchGlob(url: string, pattern: string): boolean {
@@ -69,6 +111,9 @@ export async function scrapeUrls(input: ScraperInput, pushData: (data: PageData)
         extractEmails = true,
         extractPhones = true,
         extractMarkdown = false,
+        stripBoilerplate = true,
+        chunkSize = 0,
+        chunkOverlap = 200,
         cssSelector,
         maxDepth = 0,
         maxPages = 100,
@@ -120,6 +165,7 @@ export async function scrapeUrls(input: ScraperInput, pushData: (data: PageData)
                 phones: [],
                 socialLinks: [],
                 markdown: null,
+                chunks: null,
                 selectedContent: null,
                 statusCode: actualStatus,
                 contentType: actualContentType,
@@ -182,28 +228,42 @@ export async function scrapeUrls(input: ScraperInput, pushData: (data: PageData)
                 data.selectedContent = selected.length > 0 ? selected.text().replace(/\s+/g, ' ').trim() : null;
             }
 
-            // Markdown output — basic HTML to markdown before script removal
+            // Markdown output with boilerplate stripping + optional chunking
             if (extractMarkdown) {
-                const html = $('body').html() ?? '';
-                let md = html
-                    .replace(/<script[\s\S]*?<\/script>/gi, '')
-                    .replace(/<style[\s\S]*?<\/style>/gi, '')
-                    .replace(/<h([1-6])[^>]*>([\s\S]*?)<\/h\1>/gi, (_m, l, t) => '#'.repeat(parseInt(l)) + ' ' + t.replace(/<[^>]+>/g, '').trim() + '\n\n')
+                // Strip boilerplate elements before conversion
+                const $md = $.root().clone();
+                if (stripBoilerplate) {
+                    $md.find('nav, header, footer, aside, [role="navigation"], [role="banner"], [role="contentinfo"], .sidebar, .nav, .footer, .header, .cookie-banner, .cookie-notice, #cookie-notice').remove();
+                }
+                $md.find('script, style, noscript, iframe').remove();
+
+                const mdHtml = $md.find('main, article, [role="main"]').html() || $md.find('body').html() || '';
+                let md = mdHtml
+                    .replace(/<h([1-6])[^>]*>([\s\S]*?)<\/h\1>/gi, (_m: string, l: string, t: string) => '#'.repeat(parseInt(l)) + ' ' + t.replace(/<[^>]+>/g, '').trim() + '\n\n')
                     .replace(/<a\s+href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi, '[$2]($1)')
                     .replace(/<strong>([\s\S]*?)<\/strong>/gi, '**$1**')
                     .replace(/<b>([\s\S]*?)<\/b>/gi, '**$1**')
                     .replace(/<em>([\s\S]*?)<\/em>/gi, '*$1*')
                     .replace(/<i>([\s\S]*?)<\/i>/gi, '*$1*')
+                    .replace(/<pre><code>([\s\S]*?)<\/code><\/pre>/gi, '```\n$1\n```\n')
                     .replace(/<code>([\s\S]*?)<\/code>/gi, '`$1`')
                     .replace(/<li>([\s\S]*?)<\/li>/gi, '- $1\n')
                     .replace(/<br\s*\/?>/gi, '\n')
                     .replace(/<p>([\s\S]*?)<\/p>/gi, '$1\n\n')
+                    .replace(/<blockquote>([\s\S]*?)<\/blockquote>/gi, '> $1\n\n')
+                    .replace(/<hr\s*\/?>/gi, '---\n\n')
                     .replace(/<img\s+[^>]*src="([^"]*)"[^>]*alt="([^"]*)"[^>]*>/gi, '![$2]($1)')
                     .replace(/<img\s+[^>]*src="([^"]*)"[^>]*>/gi, '![]($1)')
                     .replace(/<[^>]+>/g, '')
+                    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#x27;/g, "'")
                     .replace(/\n{3,}/g, '\n\n')
                     .trim();
-                data.markdown = md.slice(0, 50000);
+                data.markdown = md.slice(0, 100000);
+
+                // Heading-aware chunking for LLM/RAG
+                if (chunkSize > 0 && md.length > 0) {
+                    data.chunks = chunkText(md, chunkSize, chunkOverlap);
+                }
             }
 
             // Text content — removes scripts/styles, must be after JSON-LD and selector
@@ -338,7 +398,7 @@ export async function scrapeUrls(input: ScraperInput, pushData: (data: PageData)
                 openGraph: {}, twitterCard: {},
                 tables: [], structuredData: [], emails: [], phones: [],
                 socialLinks: [],
-                markdown: null, selectedContent: null, statusCode: 0,
+                markdown: null, chunks: null, selectedContent: null, statusCode: 0,
                 contentType: null, responseTimeMs: null, pageSizeBytes: null,
                 responseHeaders: {},
                 scrapedAt: new Date().toISOString(),
