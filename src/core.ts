@@ -24,19 +24,28 @@ export interface PageData {
     url: string;
     title: string | null;
     description: string | null;
+    language: string | null;
+    canonicalUrl: string | null;
+    robotsDirectives: string | null;
     text: string | null;
     headings: { level: number; text: string }[];
-    links: { href: string; text: string; isExternal: boolean }[];
+    links: { href: string; text: string; isExternal: boolean; rel: string | null }[];
     images: { src: string; alt: string; width: string | null; height: string | null }[];
     meta: Record<string, string>;
+    openGraph: Record<string, string>;
+    twitterCard: Record<string, string>;
     tables: { headers: string[]; rows: string[][] }[];
     structuredData: unknown[];
     emails: string[];
     phones: string[];
+    socialLinks: string[];
     markdown: string | null;
     selectedContent: string | null;
     statusCode: number;
     contentType: string | null;
+    responseTimeMs: number | null;
+    pageSizeBytes: number | null;
+    responseHeaders: Record<string, string>;
     scrapedAt: string;
     status: 'success' | 'error';
     error: string | null;
@@ -70,47 +79,89 @@ export async function scrapeUrls(input: ScraperInput, pushData: (data: PageData)
 
     let pagesScraped = 0;
 
-    const crawlerOptions: Record<string, unknown> = {
-        maxRequestsPerCrawl: maxPages,
-    };
-
     const crawler = new CheerioCrawler({
-        ...crawlerOptions,
-        async requestHandler({ request, $, enqueueLinks }: CheerioCrawlingContext) {
+        maxRequestsPerCrawl: maxPages,
+        ...(proxyUrl ? { proxyUrls: [proxyUrl] } : {}),
+        async requestHandler({ request, $, response }: CheerioCrawlingContext) {
+            const startTime = Date.now();
             const currentDepth = (request.userData?.depth as number) ?? 0;
             const pageUrl = request.loadedUrl ?? request.url;
+
+            // Fix bug: read actual statusCode and contentType from response
+            const actualStatus = response?.statusCode ?? 200;
+            const actualContentType = response?.headers?.['content-type'] as string ?? null;
+
+            // Collect response headers
+            const respHeaders: Record<string, string> = {};
+            if (response?.headers) {
+                for (const [k, v] of Object.entries(response.headers)) {
+                    if (typeof v === 'string') respHeaders[k] = v;
+                    else if (Array.isArray(v)) respHeaders[k] = v.join(', ');
+                }
+            }
 
             const data: PageData = {
                 url: pageUrl,
                 title: null,
                 description: null,
+                language: null,
+                canonicalUrl: null,
+                robotsDirectives: null,
                 text: null,
                 headings: [],
                 links: [],
                 images: [],
                 meta: {},
+                openGraph: {},
+                twitterCard: {},
                 tables: [],
                 structuredData: [],
                 emails: [],
                 phones: [],
+                socialLinks: [],
                 markdown: null,
                 selectedContent: null,
-                statusCode: 200,
-                contentType: null,
+                statusCode: actualStatus,
+                contentType: actualContentType,
+                responseTimeMs: null,
+                pageSizeBytes: null,
+                responseHeaders: respHeaders,
                 scrapedAt: new Date().toISOString(),
                 status: 'success',
                 error: null,
             };
 
+            // Page size
+            const html = $.html();
+            data.pageSizeBytes = Buffer.byteLength(html, 'utf8');
+
+            // Page language
+            data.language = $('html').attr('lang') ?? null;
+
+            // Canonical URL
+            const canonical = $('link[rel="canonical"]').attr('href');
+            data.canonicalUrl = canonical ?? null;
+
+            // Robots directives (meta + header)
+            const robotsMeta = $('meta[name="robots"]').attr('content') ?? '';
+            const robotsHeader = respHeaders['x-robots-tag'] ?? '';
+            const robotsCombined = [robotsMeta, robotsHeader].filter(Boolean).join(', ');
+            data.robotsDirectives = robotsCombined || null;
+
             // Title
             data.title = $('title').text().trim() || null;
 
-            // Meta tags
+            // Meta tags + Open Graph + Twitter Card
             if (extractMeta) {
                 $('meta').each((_i, el) => {
                     const name = $(el).attr('name') || $(el).attr('property') || '';
                     const content = $(el).attr('content') || '';
-                    if (name && content) data.meta[name] = content;
+                    if (name && content) {
+                        data.meta[name] = content;
+                        // Split into dedicated OG and Twitter objects
+                        if (name.startsWith('og:')) data.openGraph[name.replace('og:', '')] = content;
+                        if (name.startsWith('twitter:')) data.twitterCard[name.replace('twitter:', '')] = content;
+                    }
                 });
                 data.description = data.meta['description'] || data.meta['og:description'] || null;
             }
@@ -174,17 +225,29 @@ export async function scrapeUrls(input: ScraperInput, pushData: (data: PageData)
             // Links
             if (extractLinks) {
                 const pageOrigin = new URL(pageUrl).origin;
+                const socialDomains = ['facebook.com', 'twitter.com', 'x.com', 'linkedin.com', 'instagram.com', 'youtube.com', 'tiktok.com', 'github.com', 'pinterest.com'];
+                const socialSet = new Set<string>();
+
                 $('a[href]').each((_i, el) => {
                     const href = $(el).attr('href') ?? '';
                     const text = $(el).text().trim();
+                    const rel = $(el).attr('rel') ?? null;
                     try {
                         const absolute = new URL(href, pageUrl).href;
                         if (absolute.startsWith('http')) {
                             const isExternal = new URL(absolute).origin !== pageOrigin;
-                            data.links.push({ href: absolute, text: text.slice(0, 200), isExternal });
+                            data.links.push({ href: absolute, text: text.slice(0, 200), isExternal, rel });
+
+                            // Detect social media links
+                            const linkHost = new URL(absolute).hostname.replace('www.', '');
+                            if (socialDomains.some(d => linkHost.includes(d))) {
+                                socialSet.add(absolute);
+                            }
                         }
                     } catch { /* skip malformed */ }
                 });
+
+                data.socialLinks = [...socialSet];
             }
 
             // Images
@@ -244,6 +307,9 @@ export async function scrapeUrls(input: ScraperInput, pushData: (data: PageData)
                 }
             }
 
+            // Response time
+            data.responseTimeMs = Date.now() - startTime;
+
             await pushData(data);
             pagesScraped++;
 
@@ -266,11 +332,16 @@ export async function scrapeUrls(input: ScraperInput, pushData: (data: PageData)
         async failedRequestHandler({ request }) {
             await pushData({
                 url: request.url,
-                title: null, description: null, text: null,
+                title: null, description: null, language: null,
+                canonicalUrl: null, robotsDirectives: null, text: null,
                 headings: [], links: [], images: [], meta: {},
+                openGraph: {}, twitterCard: {},
                 tables: [], structuredData: [], emails: [], phones: [],
+                socialLinks: [],
                 markdown: null, selectedContent: null, statusCode: 0,
-                contentType: null, scrapedAt: new Date().toISOString(),
+                contentType: null, responseTimeMs: null, pageSizeBytes: null,
+                responseHeaders: {},
+                scrapedAt: new Date().toISOString(),
                 status: 'error',
                 error: request.errorMessages?.slice(-1)[0] ?? 'Unknown error',
             });
