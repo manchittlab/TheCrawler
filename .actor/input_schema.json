@@ -1,0 +1,111 @@
+{
+    "title": "Universal Web Scraper Input",
+    "description": "Extract all data from any webpage.",
+    "type": "object",
+    "schemaVersion": 1,
+    "properties": {
+        "urls": {
+            "title": "URLs to Scrape",
+            "type": "array",
+            "description": "List of URLs to scrape.",
+            "editor": "stringList",
+            "items": { "type": "string" },
+            "prefill": ["https://example.com"]
+        },
+        "extractText": {
+            "title": "Extract Text",
+            "type": "boolean",
+            "description": "Extract visible text content (scripts/styles removed).",
+            "default": true,
+            "editor": "checkbox"
+        },
+        "extractLinks": {
+            "title": "Extract Links",
+            "type": "boolean",
+            "description": "Extract all links with href, anchor text, and internal/external flag.",
+            "default": true,
+            "editor": "checkbox"
+        },
+        "extractImages": {
+            "title": "Extract Images",
+            "type": "boolean",
+            "description": "Extract all images with src, alt text, dimensions.",
+            "default": true,
+            "editor": "checkbox"
+        },
+        "extractMeta": {
+            "title": "Extract Meta Tags",
+            "type": "boolean",
+            "description": "Extract all meta tags (description, og:title, keywords, etc).",
+            "default": true,
+            "editor": "checkbox"
+        },
+        "extractHeadings": {
+            "title": "Extract Headings",
+            "type": "boolean",
+            "description": "Extract all h1-h6 headings with their level.",
+            "default": true,
+            "editor": "checkbox"
+        },
+        "extractTables": {
+            "title": "Extract Tables",
+            "type": "boolean",
+            "description": "Extract HTML tables as structured data (headers + rows).",
+            "default": true,
+            "editor": "checkbox"
+        },
+        "extractStructuredData": {
+            "title": "Extract JSON-LD",
+            "type": "boolean",
+            "description": "Extract JSON-LD structured data (schema.org).",
+            "default": true,
+            "editor": "checkbox"
+        },
+        "extractEmails": {
+            "title": "Extract Emails",
+            "type": "boolean",
+            "description": "Find email addresses in the page HTML.",
+            "default": true,
+            "editor": "checkbox"
+        },
+        "extractPhones": {
+            "title": "Extract Phone Numbers",
+            "type": "boolean",
+            "description": "Find phone numbers in the page HTML.",
+            "default": true,
+            "editor": "checkbox"
+        },
+        "cssSelector": {
+            "title": "CSS Selector",
+            "type": "string",
+            "description": "Target specific content. Returns matching text in selectedContent field. Example: .product-price, #main-content, article",
+            "editor": "textfield"
+        },
+        "maxDepth": {
+            "title": "Crawl Depth",
+            "type": "integer",
+            "description": "0 = scrape listed URLs only. 1+ = follow internal links to that depth.",
+            "default": 0,
+            "minimum": 0,
+            "maximum": 5,
+            "editor": "number"
+        },
+        "maxPages": {
+            "title": "Max Pages",
+            "type": "integer",
+            "description": "Maximum total pages to scrape (including followed links).",
+            "default": 100,
+            "minimum": 1,
+            "maximum": 10000,
+            "editor": "number"
+        },
+        "dryRun": {
+            "title": "Dry Run",
+            "type": "boolean",
+            "description": "Scrape pages but don't charge.",
+            "default": false,
+            "editor": "checkbox"
+        }
+    },
+    "required": ["urls"]
+}

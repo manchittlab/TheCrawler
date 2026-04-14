@@ -1,0 +1,38 @@
+{
+    "actorSpecification": 1,
+    "name": "claw-scraper",
+    "title": "Claw Scraper — Extract Everything from Any Page",
+    "description": "Scrape any webpage: text, links, images, meta tags, headings, tables, JSON-LD structured data, emails, phone numbers. CSS selector targeting. Recursive crawling. CheerioCrawler — fast, no headless browser. $0.003/page.",
+    "version": "0.1",
+    "buildTag": "latest",
+    "environmentVariables": {},
+    "dockerfile": "./Dockerfile",
+    "readme": "../README.md",
+    "input": "./input_schema.json",
+    "storages": {
+        "dataset": {
+            "actorSpecification": 1,
+            "fields": {},
+            "views": {
+                "overview": {
+                    "title": "Scraped Pages",
+                    "transformation": {
+                        "fields": ["url", "title", "description", "statusCode", "scrapedAt", "status", "error"]
+                    },
+                    "display": {
+                        "component": "table",
+                        "properties": {
+                            "url": { "label": "URL", "format": "text" },
+                            "title": { "label": "Title", "format": "text" },
+                            "description": { "label": "Description", "format": "text" },
+                            "statusCode": { "label": "HTTP Status", "format": "number" },
+                            "scrapedAt": { "label": "Scraped At", "format": "text" },
+                            "status": { "label": "Status", "format": "text" },
+                            "error": { "label": "Error", "format": "text" }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

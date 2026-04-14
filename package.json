@@ -1,0 +1,22 @@
+{
+    "name": "web-scraper",
+    "version": "1.0.0",
+    "description": "Universal web scraper — extract all text, links, images, meta tags, headings, tables, and structured data from any URL",
+    "type": "module",
+    "main": "dist/main.js",
+    "scripts": {
+        "build": "tsc",
+        "start": "node dist/main.js"
+    },
+    "dependencies": {
+        "apify": "^3.2.2",
+        "crawlee": "^3.9.0"
+    },
+    "devDependencies": {
+        "@types/node": "^20.0.0",
+        "typescript": "^5.4.0"
+    },
+    "engines": {
+        "node": ">=18.0.0"
+    }
+}
