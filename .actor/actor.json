@@ -1,8 +1,8 @@
 {
     "actorSpecification": 1,
-    "name": "claw-scraper",
-    "title": "Claw Scraper — Extract Everything from Any Page",
-    "description": "Scrape any webpage: text, links, images, meta tags, headings, tables, JSON-LD structured data, emails, phone numbers. CSS selector targeting. Recursive crawling. CheerioCrawler — fast, no headless browser. $0.003/page.",
+    "name": "the-crawler",
+    "title": "TheCrawler — Scrape Everything from Any Page",
+    "description": "Scrape any webpage with JS rendering (Playwright) or fast HTTP (Cheerio). Extract text, links, images, meta, headings, tables, JSON-LD, emails, phones, OG/Twitter cards, social links. LLM-ready markdown with heading-aware chunking. CSS selectors, recursive crawling, URL filtering. $0.003/page.",
     "version": "0.1",
     "buildTag": "latest",
     "environmentVariables": {},

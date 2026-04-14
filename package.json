@@ -10,7 +10,9 @@
     },
     "dependencies": {
         "apify": "^3.2.2",
-        "crawlee": "^3.9.0"
+        "cheerio": "^1.0.0",
+        "crawlee": "^3.9.0",
+        "playwright": "*"
     },
     "devDependencies": {
         "@types/node": "^20.0.0",

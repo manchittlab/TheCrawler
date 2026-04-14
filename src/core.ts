@@ -1,4 +1,5 @@
-import { CheerioCrawler, type CheerioCrawlingContext } from 'crawlee';
+import { CheerioCrawler, PlaywrightCrawler, type CheerioCrawlingContext, type PlaywrightCrawlingContext } from 'crawlee';
+import * as cheerioLib from 'cheerio';
 
 export interface ScraperInput {
     urls: string[];
@@ -21,6 +22,9 @@ export interface ScraperInput {
     includeGlobs?: string[];
     excludeGlobs?: string[];
     proxyUrl?: string;
+    usePlaywright?: boolean;
+    waitForSelector?: string;
+    waitForMs?: number;
 }
 
 export interface PageData {
@@ -120,30 +124,25 @@ export async function scrapeUrls(input: ScraperInput, pushData: (data: PageData)
         includeGlobs = [],
         excludeGlobs = [],
         proxyUrl,
+        usePlaywright = false,
+        waitForSelector,
+        waitForMs = 0,
     } = input;
 
     let pagesScraped = 0;
 
-    const crawler = new CheerioCrawler({
-        maxRequestsPerCrawl: maxPages,
-        ...(proxyUrl ? { proxyUrls: [proxyUrl] } : {}),
-        async requestHandler({ request, $, response }: CheerioCrawlingContext) {
-            const startTime = Date.now();
+    // Shared handler logic — works with Cheerio $ from either crawler
+    async function handlePage(
+        request: { url: string; loadedUrl?: string; userData?: Record<string, unknown>; errorMessages?: string[] },
+        $: any, // CheerioAPI — using any to avoid version mismatch between crawlee's cheerio and ours
+        responseHeaders: Record<string, string>,
+        actualStatus: number,
+        actualContentType: string | null,
+        startTime: number,
+    ) {
             const currentDepth = (request.userData?.depth as number) ?? 0;
             const pageUrl = request.loadedUrl ?? request.url;
-
-            // Fix bug: read actual statusCode and contentType from response
-            const actualStatus = response?.statusCode ?? 200;
-            const actualContentType = response?.headers?.['content-type'] as string ?? null;
-
-            // Collect response headers
-            const respHeaders: Record<string, string> = {};
-            if (response?.headers) {
-                for (const [k, v] of Object.entries(response.headers)) {
-                    if (typeof v === 'string') respHeaders[k] = v;
-                    else if (Array.isArray(v)) respHeaders[k] = v.join(', ');
-                }
-            }
+            const respHeaders = responseHeaders;
 
             const data: PageData = {
                 url: pageUrl,
@@ -199,7 +198,7 @@ export async function scrapeUrls(input: ScraperInput, pushData: (data: PageData)
 
             // Meta tags + Open Graph + Twitter Card
             if (extractMeta) {
-                $('meta').each((_i, el) => {
+                $('meta').each((_i: any, el: any) => {
                     const name = $(el).attr('name') || $(el).attr('property') || '';
                     const content = $(el).attr('content') || '';
                     if (name && content) {
@@ -214,7 +213,7 @@ export async function scrapeUrls(input: ScraperInput, pushData: (data: PageData)
 
             // JSON-LD structured data — MUST run BEFORE text extraction removes script tags
             if (extractStructuredData) {
-                $('script[type="application/ld+json"]').each((_i, el) => {
+                $('script[type="application/ld+json"]').each((_i: any, el: any) => {
                     try {
                         const json = JSON.parse($(el).html() ?? '');
                         data.structuredData.push(json);
@@ -274,7 +273,7 @@ export async function scrapeUrls(input: ScraperInput, pushData: (data: PageData)
 
             // Headings
             if (extractHeadings) {
-                $('h1, h2, h3, h4, h5, h6').each((_i, el) => {
+                $('h1, h2, h3, h4, h5, h6').each((_i: any, el: any) => {
                     const tag = (el as { tagName?: string }).tagName ?? '';
                     const level = parseInt(tag.replace('h', ''), 10);
                     const text = $(el).text().trim();
@@ -288,7 +287,7 @@ export async function scrapeUrls(input: ScraperInput, pushData: (data: PageData)
                 const socialDomains = ['facebook.com', 'twitter.com', 'x.com', 'linkedin.com', 'instagram.com', 'youtube.com', 'tiktok.com', 'github.com', 'pinterest.com'];
                 const socialSet = new Set<string>();
 
-                $('a[href]').each((_i, el) => {
+                $('a[href]').each((_i: any, el: any) => {
                     const href = $(el).attr('href') ?? '';
                     const text = $(el).text().trim();
                     const rel = $(el).attr('rel') ?? null;
@@ -312,7 +311,7 @@ export async function scrapeUrls(input: ScraperInput, pushData: (data: PageData)
 
             // Images
             if (extractImages) {
-                $('img').each((_i, el) => {
+                $('img').each((_i: any, el: any) => {
                     const src = $(el).attr('src') ?? '';
                     if (!src) return;
                     let absoluteSrc = src;
@@ -328,15 +327,15 @@ export async function scrapeUrls(input: ScraperInput, pushData: (data: PageData)
 
             // Tables
             if (extractTables) {
-                $('table').each((_i, table) => {
+                $('table').each((_i: any, table: any) => {
                     const headers: string[] = [];
-                    $(table).find('th').each((_j, th) => {
+                    $(table).find('th').each((_j: any, th: any) => {
                         headers.push($(th).text().trim());
                     });
                     const rows: string[][] = [];
-                    $(table).find('tr').each((_j, tr) => {
+                    $(table).find('tr').each((_j: any, tr: any) => {
                         const cells: string[] = [];
-                        $(tr).find('td').each((_k, td) => {
+                        $(tr).find('td').each((_k: any, td: any) => {
                             cells.push($(td).text().trim());
                         });
                         if (cells.length > 0) rows.push(cells);
@@ -351,67 +350,132 @@ export async function scrapeUrls(input: ScraperInput, pushData: (data: PageData)
 
             // Emails
             if (extractEmails) {
-                const html = $.html();
-                const emailMatches = html.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g);
+                const rawHtml = String($.html() ?? '');
+                const emailMatches = rawHtml.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g);
                 if (emailMatches) {
-                    data.emails = [...new Set(emailMatches)].slice(0, 50);
+                    data.emails = [...new Set(emailMatches as string[])].slice(0, 50);
                 }
             }
 
             // Phones
             if (extractPhones) {
-                const html = $.html();
-                const phoneMatches = html.match(/(?:\+?\d{1,3}[-.\s]?)?\(?\d{2,4}\)?[-.\s]?\d{3,4}[-.\s]?\d{3,4}/g);
+                const rawHtml2 = String($.html() ?? '');
+                const phoneMatches = rawHtml2.match(/(?:\+?\d{1,3}[-.\s]?)?\(?\d{2,4}\)?[-.\s]?\d{3,4}[-.\s]?\d{3,4}/g);
                 if (phoneMatches) {
-                    data.phones = [...new Set(phoneMatches.filter(p => p.replace(/\D/g, '').length >= 7))].slice(0, 20);
+                    data.phones = [...new Set((phoneMatches as string[]).filter((p: string) => p.replace(/\D/g, '').length >= 7))].slice(0, 20);
                 }
             }
 
             // Response time
             data.responseTimeMs = Date.now() - startTime;
 
-            await pushData(data);
-            pagesScraped++;
+            return { data, internalLinks: data.links.filter(l => !l.isExternal) };
+    }
 
-            // Follow internal links if depth allows, with URL filtering
-            if (maxDepth > 0 && currentDepth < maxDepth) {
-                const internalLinks = data.links.filter(l => !l.isExternal);
-                for (const link of internalLinks.slice(0, 50)) {
-                    // Apply include/exclude globs
-                    if (excludeGlobs.length > 0 && excludeGlobs.some(g => matchGlob(link.href, g))) continue;
-                    if (includeGlobs.length > 0 && !includeGlobs.some(g => matchGlob(link.href, g))) continue;
+    const failedHandler = async (request: { url: string; errorMessages?: string[] }) => {
+        await pushData({
+            url: request.url,
+            title: null, description: null, language: null,
+            canonicalUrl: null, robotsDirectives: null, text: null,
+            headings: [], links: [], images: [], meta: {},
+            openGraph: {}, twitterCard: {},
+            tables: [], structuredData: [], emails: [], phones: [],
+            socialLinks: [],
+            markdown: null, chunks: null, selectedContent: null, statusCode: 0,
+            contentType: null, responseTimeMs: null, pageSizeBytes: null,
+            responseHeaders: {},
+            scrapedAt: new Date().toISOString(),
+            status: 'error',
+            error: request.errorMessages?.slice(-1)[0] ?? 'Unknown error',
+        });
+    };
 
-                    await crawler.addRequests([{
-                        url: link.href,
-                        userData: { depth: currentDepth + 1 },
-                    }]);
-                }
-            }
-        },
-
-        async failedRequestHandler({ request }) {
-            await pushData({
-                url: request.url,
-                title: null, description: null, language: null,
-                canonicalUrl: null, robotsDirectives: null, text: null,
-                headings: [], links: [], images: [], meta: {},
-                openGraph: {}, twitterCard: {},
-                tables: [], structuredData: [], emails: [], phones: [],
-                socialLinks: [],
-                markdown: null, chunks: null, selectedContent: null, statusCode: 0,
-                contentType: null, responseTimeMs: null, pageSizeBytes: null,
-                responseHeaders: {},
-                scrapedAt: new Date().toISOString(),
-                status: 'error',
-                error: request.errorMessages?.slice(-1)[0] ?? 'Unknown error',
-            });
-        },
-    });
-
-    await crawler.run(urls.map(url => ({
+    const startUrls = urls.map(url => ({
         url: url.startsWith('http') ? url : `https://${url}`,
         userData: { depth: 0 },
-    })));
+    }));
+
+    if (usePlaywright) {
+        // Playwright mode — full JS rendering
+        const crawler = new PlaywrightCrawler({
+            maxRequestsPerCrawl: maxPages,
+            async requestHandler({ request, page, response }: PlaywrightCrawlingContext) {
+                const startTime = Date.now();
+
+                // Wait for content if configured
+                if (waitForSelector) {
+                    try { await page.waitForSelector(waitForSelector, { timeout: waitForMs || 10000 }); } catch { /* continue */ }
+                } else if (waitForMs > 0) {
+                    await page.waitForTimeout(waitForMs);
+                }
+
+                const html = await page.content();
+                const $ = cheerioLib.load(html);
+
+                const respHeaders: Record<string, string> = {};
+                const headers = response?.headers() ?? {};
+                for (const [k, v] of Object.entries(headers)) {
+                    respHeaders[k] = v;
+                }
+
+                const { data, internalLinks } = await handlePage(
+                    request, $, respHeaders,
+                    response?.status() ?? 200,
+                    respHeaders['content-type'] ?? null,
+                    startTime,
+                );
+                await pushData(data);
+                pagesScraped++;
+
+                // Follow links
+                if (maxDepth > 0 && (request.userData?.depth as number ?? 0) < maxDepth) {
+                    for (const link of internalLinks.slice(0, 50)) {
+                        if (excludeGlobs.length > 0 && excludeGlobs.some(g => matchGlob(link.href, g))) continue;
+                        if (includeGlobs.length > 0 && !includeGlobs.some(g => matchGlob(link.href, g))) continue;
+                        await crawler.addRequests([{ url: link.href, userData: { depth: (request.userData?.depth as number ?? 0) + 1 } }]);
+                    }
+                }
+            },
+            async failedRequestHandler({ request }) { await failedHandler(request); },
+        });
+        await crawler.run(startUrls);
+    } else {
+        // Cheerio mode — fast HTTP only
+        const crawler = new CheerioCrawler({
+            maxRequestsPerCrawl: maxPages,
+            async requestHandler({ request, $, response }: CheerioCrawlingContext) {
+                const startTime = Date.now();
+
+                const respHeaders: Record<string, string> = {};
+                if (response?.headers) {
+                    for (const [k, v] of Object.entries(response.headers)) {
+                        if (typeof v === 'string') respHeaders[k] = v;
+                        else if (Array.isArray(v)) respHeaders[k] = v.join(', ');
+                    }
+                }
+
+                const { data, internalLinks } = await handlePage(
+                    request, $, respHeaders,
+                    response?.statusCode ?? 200,
+                    respHeaders['content-type'] ?? null,
+                    startTime,
+                );
+                await pushData(data);
+                pagesScraped++;
+
+                // Follow links
+                if (maxDepth > 0 && (request.userData?.depth as number ?? 0) < maxDepth) {
+                    for (const link of internalLinks.slice(0, 50)) {
+                        if (excludeGlobs.length > 0 && excludeGlobs.some(g => matchGlob(link.href, g))) continue;
+                        if (includeGlobs.length > 0 && !includeGlobs.some(g => matchGlob(link.href, g))) continue;
+                        await crawler.addRequests([{ url: link.href, userData: { depth: (request.userData?.depth as number ?? 0) + 1 } }]);
+                    }
+                }
+            },
+            async failedRequestHandler({ request }) { await failedHandler(request); },
+        });
+        await crawler.run(startUrls);
+    }
 
     return pagesScraped;
 }
