@@ -1,4 +1,4 @@
-import { CheerioCrawler, PlaywrightCrawler, type CheerioCrawlingContext, type PlaywrightCrawlingContext } from 'crawlee';
+import { CheerioCrawler, PlaywrightCrawler, ProxyConfiguration, type CheerioCrawlingContext, type PlaywrightCrawlingContext } from 'crawlee';
 import * as cheerioLib from 'cheerio';
 
 export interface ScraperInput {
@@ -395,10 +395,15 @@ export async function scrapeUrls(input: ScraperInput, pushData: (data: PageData)
         userData: { depth: 0 },
     }));
 
+    const proxyConfiguration = proxyUrl
+        ? new ProxyConfiguration({ proxyUrls: [proxyUrl] })
+        : undefined;
+
     if (usePlaywright) {
         // Playwright mode — full JS rendering
         const crawler = new PlaywrightCrawler({
             maxRequestsPerCrawl: maxPages,
+            proxyConfiguration,
             async requestHandler({ request, page, response }: PlaywrightCrawlingContext) {
                 const startTime = Date.now();
 
@@ -443,6 +448,7 @@ export async function scrapeUrls(input: ScraperInput, pushData: (data: PageData)
         // Cheerio mode — fast HTTP only
         const crawler = new CheerioCrawler({
             maxRequestsPerCrawl: maxPages,
+            proxyConfiguration,
             async requestHandler({ request, $, response }: CheerioCrawlingContext) {
                 const startTime = Date.now();
 

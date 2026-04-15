@@ -99,6 +99,80 @@
             "maximum": 10000,
             "editor": "number"
         },
+        "usePlaywright": {
+            "title": "Enable JS Rendering (Playwright)",
+            "type": "boolean",
+            "description": "Render JavaScript with a real browser. Required for SPAs (React, Vue, Angular), dynamic content, and sites that load data via JS. Uses more compute than default Cheerio mode.",
+            "default": false,
+            "editor": "checkbox"
+        },
+        "waitForSelector": {
+            "title": "Wait for Selector",
+            "type": "string",
+            "description": "CSS selector to wait for before extracting. Only works with Playwright enabled. Example: .product-list, #content-loaded",
+            "editor": "textfield"
+        },
+        "waitForMs": {
+            "title": "Wait (ms)",
+            "type": "integer",
+            "description": "Milliseconds to wait after page load before extracting. Only works with Playwright enabled. Useful for lazy-loading content.",
+            "default": 0,
+            "minimum": 0,
+            "maximum": 30000,
+            "editor": "number"
+        },
+        "extractMarkdown": {
+            "title": "Extract Markdown",
+            "type": "boolean",
+            "description": "Convert page content to clean Markdown. Strips navigation, footers, and boilerplate when stripBoilerplate is enabled. Ideal for LLM/RAG pipelines.",
+            "default": false,
+            "editor": "checkbox"
+        },
+        "stripBoilerplate": {
+            "title": "Strip Boilerplate",
+            "type": "boolean",
+            "description": "Remove nav, header, footer, sidebar, and ads before markdown conversion. Keeps only main content.",
+            "default": true,
+            "editor": "checkbox"
+        },
+        "chunkSize": {
+            "title": "Chunk Size (chars)",
+            "type": "integer",
+            "description": "Split markdown into chunks of this size. Each chunk includes section heading, index, and content hash. Set to 0 to disable chunking.",
+            "default": 0,
+            "minimum": 0,
+            "maximum": 50000,
+            "editor": "number"
+        },
+        "chunkOverlap": {
+            "title": "Chunk Overlap (chars)",
+            "type": "integer",
+            "description": "Character overlap between consecutive chunks. Prevents losing context at chunk boundaries. Typical: 10-20% of chunk size.",
+            "default": 200,
+            "minimum": 0,
+            "maximum": 5000,
+            "editor": "number"
+        },
+        "includeGlobs": {
+            "title": "Include URL Patterns",
+            "type": "array",
+            "description": "Only follow links matching these glob patterns when crawling. Example: https://example.com/blog/**",
+            "editor": "stringList",
+            "items": { "type": "string" }
+        },
+        "excludeGlobs": {
+            "title": "Exclude URL Patterns",
+            "type": "array",
+            "description": "Skip links matching these glob patterns. Example: **/login/**, **/admin/**",
+            "editor": "stringList",
+            "items": { "type": "string" }
+        },
+        "proxyUrl": {
+            "title": "Proxy URL",
+            "type": "string",
+            "description": "HTTP/SOCKS proxy URL for requests. Format: http://user:pass@host:port or socks5://user:pass@host:port. Use Apify Proxy or your own.",
+            "editor": "textfield"
+        },
         "dryRun": {
             "title": "Dry Run",
             "type": "boolean",
