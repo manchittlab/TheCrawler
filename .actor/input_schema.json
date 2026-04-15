@@ -173,6 +173,27 @@
             "description": "HTTP/SOCKS proxy URL for requests. Format: http://user:pass@host:port or socks5://user:pass@host:port. Use Apify Proxy or your own.",
             "editor": "textfield"
         },
+        "searchQuery": {
+            "title": "Search Query",
+            "type": "string",
+            "description": "Search Google and scrape the top results. Leave URLs empty to use search mode. Example: 'best project management tools 2026'",
+            "editor": "textfield"
+        },
+        "searchLimit": {
+            "title": "Search Results Limit",
+            "type": "integer",
+            "description": "Maximum number of search results to scrape (default: 10).",
+            "default": 10,
+            "minimum": 1,
+            "maximum": 50,
+            "editor": "number"
+        },
+        "actions": {
+            "title": "Browser Actions (Playwright only)",
+            "type": "array",
+            "description": "Actions to perform before extraction. Requires Playwright enabled. JSON array. Types: click (selector), fill (selector + value), scroll (pixels), wait (ms), screenshot. Example: [{\"type\":\"click\",\"selector\":\".load-more\"},{\"type\":\"scroll\",\"pixels\":2000}]",
+            "editor": "json"
+        },
         "dryRun": {
             "title": "Dry Run",
             "type": "boolean",

@@ -1,8 +1,19 @@
 import { CheerioCrawler, PlaywrightCrawler, ProxyConfiguration, type CheerioCrawlingContext, type PlaywrightCrawlingContext } from 'crawlee';
 import * as cheerioLib from 'cheerio';
+import { createRequire } from 'node:module';
+
+export interface BrowserAction {
+    type: 'click' | 'fill' | 'scroll' | 'wait' | 'screenshot';
+    selector?: string;
+    value?: string;
+    pixels?: number;
+    ms?: number;
+}
 
 export interface ScraperInput {
     urls: string[];
+    searchQuery?: string;
+    searchLimit?: number;
     extractText?: boolean;
     extractLinks?: boolean;
     extractImages?: boolean;
@@ -25,6 +36,7 @@ export interface ScraperInput {
     usePlaywright?: boolean;
     waitForSelector?: string;
     waitForMs?: number;
+    actions?: BrowserAction[];
 }
 
 export interface PageData {
@@ -54,6 +66,8 @@ export interface PageData {
     responseTimeMs: number | null;
     pageSizeBytes: number | null;
     responseHeaders: Record<string, string>;
+    pdf: { text: string | null; pages: number; metadata: Record<string, string> } | null;
+    screenshots: string[];
     scrapedAt: string;
     status: 'success' | 'error';
     error: string | null;
@@ -102,9 +116,83 @@ function matchGlob(url: string, pattern: string): boolean {
     return regex.test(url);
 }
 
+// --- Search: fetch Google results and extract URLs ---
+async function searchGoogle(query: string, limit: number): Promise<string[]> {
+    const encoded = encodeURIComponent(query);
+    const res = await fetch(`https://www.google.com/search?q=${encoded}&num=${limit}`, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' },
+    });
+    const html = await res.text();
+    const urls: string[] = [];
+    const regex = /href="\/url\?q=(https?:\/\/[^&"]+)/g;
+    let match;
+    while ((match = regex.exec(html)) !== null) {
+        const url = decodeURIComponent(match[1]);
+        if (!url.includes('google.com') && !url.includes('youtube.com/redirect')) {
+            urls.push(url);
+        }
+    }
+    return [...new Set(urls)].slice(0, limit);
+}
+
+// --- PDF extraction ---
+async function extractPdf(url: string): Promise<{ text: string | null; pages: number; metadata: Record<string, string> }> {
+    const require2 = createRequire(import.meta.url);
+    const pdfParse = require2('pdf-parse');
+    const res = await fetch(url, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; TheCrawler/1.0)' },
+    });
+    const buffer = Buffer.from(await res.arrayBuffer());
+    const data = await pdfParse(buffer);
+    const metadata: Record<string, string> = {};
+    if (data.info) {
+        for (const [k, v] of Object.entries(data.info)) {
+            if (typeof v === 'string') metadata[k] = v;
+        }
+    }
+    return { text: (data.text || '').slice(0, 100000), pages: data.numpages || 0, metadata };
+}
+
+// --- Browser actions executor ---
+async function executeActions(page: any, actions: BrowserAction[], kvStore: any): Promise<string[]> {
+    const screenshots: string[] = [];
+    for (const action of actions) {
+        switch (action.type) {
+            case 'click':
+                if (action.selector) {
+                    try { await page.click(action.selector, { timeout: 5000 }); } catch { /* element not found */ }
+                    await page.waitForTimeout(500);
+                }
+                break;
+            case 'fill':
+                if (action.selector && action.value !== undefined) {
+                    try { await page.fill(action.selector, action.value); } catch { /* element not found */ }
+                }
+                break;
+            case 'scroll':
+                await page.evaluate((px: number) => window.scrollBy(0, px), action.pixels ?? 1000);
+                await page.waitForTimeout(500);
+                break;
+            case 'wait':
+                await page.waitForTimeout(action.ms ?? 2000);
+                break;
+            case 'screenshot': {
+                const key = `screenshot-${Date.now()}`;
+                const buf = await page.screenshot({ fullPage: false });
+                await kvStore.setValue(key, buf, { contentType: 'image/png' });
+                screenshots.push(key);
+                break;
+            }
+        }
+    }
+    return screenshots;
+}
+
 export async function scrapeUrls(input: ScraperInput, pushData: (data: PageData) => Promise<void>): Promise<number> {
     const {
-        urls,
+        urls: inputUrls,
+        searchQuery,
+        searchLimit = 10,
         extractText = true,
         extractLinks = true,
         extractImages = true,
@@ -127,7 +215,18 @@ export async function scrapeUrls(input: ScraperInput, pushData: (data: PageData)
         usePlaywright = false,
         waitForSelector,
         waitForMs = 0,
+        actions = [],
     } = input;
+
+    // Search mode: resolve query to URLs
+    let urls = inputUrls;
+    if (searchQuery && (!urls || urls.length === 0)) {
+        const { log } = await import('apify');
+        log.info(`Searching Google for: "${searchQuery}" (limit: ${searchLimit})`);
+        urls = await searchGoogle(searchQuery, searchLimit);
+        log.info(`Found ${urls.length} URLs from search`);
+        if (urls.length === 0) return 0;
+    }
 
     let pagesScraped = 0;
 
@@ -166,6 +265,8 @@ export async function scrapeUrls(input: ScraperInput, pushData: (data: PageData)
                 markdown: null,
                 chunks: null,
                 selectedContent: null,
+                pdf: null,
+                screenshots: [],
                 statusCode: actualStatus,
                 contentType: actualContentType,
                 responseTimeMs: null,
@@ -381,7 +482,8 @@ export async function scrapeUrls(input: ScraperInput, pushData: (data: PageData)
             openGraph: {}, twitterCard: {},
             tables: [], structuredData: [], emails: [], phones: [],
             socialLinks: [],
-            markdown: null, chunks: null, selectedContent: null, statusCode: 0,
+            markdown: null, chunks: null, selectedContent: null, pdf: null, screenshots: [],
+            statusCode: 0,
             contentType: null, responseTimeMs: null, pageSizeBytes: null,
             responseHeaders: {},
             scrapedAt: new Date().toISOString(),
@@ -390,7 +492,56 @@ export async function scrapeUrls(input: ScraperInput, pushData: (data: PageData)
         });
     };
 
-    const startUrls = urls.map(url => ({
+    // Handle PDF URLs separately — they can't be parsed by Cheerio/Playwright
+    const pdfUrls = urls.filter(u => u.toLowerCase().endsWith('.pdf'));
+    const htmlUrls = urls.filter(u => !u.toLowerCase().endsWith('.pdf'));
+
+    for (const pdfUrl of pdfUrls) {
+        const fullUrl = pdfUrl.startsWith('http') ? pdfUrl : `https://${pdfUrl}`;
+        const startTime = Date.now();
+        try {
+            const pdfData = await extractPdf(fullUrl);
+            await pushData({
+                url: fullUrl,
+                title: pdfData.metadata['Title'] || null,
+                description: null, language: null, canonicalUrl: null, robotsDirectives: null,
+                text: pdfData.text,
+                headings: [], links: [], images: [], meta: {},
+                openGraph: {}, twitterCard: {},
+                tables: [], structuredData: [], emails: [], phones: [],
+                socialLinks: [],
+                markdown: pdfData.text, chunks: chunkSize > 0 && pdfData.text ? chunkText(pdfData.text, chunkSize, chunkOverlap) : null,
+                selectedContent: null,
+                pdf: pdfData, screenshots: [],
+                statusCode: 200, contentType: 'application/pdf',
+                responseTimeMs: Date.now() - startTime,
+                pageSizeBytes: null,
+                responseHeaders: {},
+                scrapedAt: new Date().toISOString(),
+                status: 'success', error: null,
+            });
+            pagesScraped++;
+        } catch (err: any) {
+            await pushData({
+                url: fullUrl,
+                title: null, description: null, language: null,
+                canonicalUrl: null, robotsDirectives: null, text: null,
+                headings: [], links: [], images: [], meta: {},
+                openGraph: {}, twitterCard: {},
+                tables: [], structuredData: [], emails: [], phones: [],
+                socialLinks: [],
+                markdown: null, chunks: null, selectedContent: null, pdf: null, screenshots: [],
+                statusCode: 0, contentType: null, responseTimeMs: null, pageSizeBytes: null,
+                responseHeaders: {},
+                scrapedAt: new Date().toISOString(),
+                status: 'error', error: `PDF extraction failed: ${err.message}`,
+            });
+        }
+    }
+
+    if (htmlUrls.length === 0) return pagesScraped;
+
+    const startUrls = htmlUrls.map(url => ({
         url: url.startsWith('http') ? url : `https://${url}`,
         userData: { depth: 0 },
     }));
@@ -414,6 +565,14 @@ export async function scrapeUrls(input: ScraperInput, pushData: (data: PageData)
                     await page.waitForTimeout(waitForMs);
                 }
 
+                // Execute browser actions (click, fill, scroll, wait, screenshot)
+                let actionScreenshots: string[] = [];
+                if (actions.length > 0) {
+                    const { Actor } = await import('apify');
+                    const kvStore = await Actor.openKeyValueStore();
+                    actionScreenshots = await executeActions(page, actions, kvStore);
+                }
+
                 const html = await page.content();
                 const $ = cheerioLib.load(html);
 
@@ -429,6 +588,7 @@ export async function scrapeUrls(input: ScraperInput, pushData: (data: PageData)
                     respHeaders['content-type'] ?? null,
                     startTime,
                 );
+                data.screenshots = actionScreenshots;
                 await pushData(data);
                 pagesScraped++;
 
