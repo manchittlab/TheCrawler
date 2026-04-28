@@ -10,7 +10,7 @@
     },
     "dependencies": {
         "apify": "^3.2.2",
-        "thecrawler": "file:./thecrawler-0.3.0.tgz"
+        "thecrawler": "file:./thecrawler-0.3.1.tgz"
     },
     "devDependencies": {
         "@types/node": "^20.0.0",
