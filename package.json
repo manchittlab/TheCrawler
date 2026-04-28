@@ -1,7 +1,7 @@
 {
-    "name": "web-scraper",
-    "version": "1.0.0",
-    "description": "Universal web scraper — extract all text, links, images, meta tags, headings, tables, and structured data from any URL",
+    "name": "the-crawler-actor",
+    "version": "0.2.0",
+    "description": "TheCrawler — Apify actor wrapper around the standalone `thecrawler` npm package. All scraping logic lives in the standalone engine; this is a thin charging + dataset-push shell.",
     "type": "module",
     "main": "dist/main.js",
     "scripts": {
@@ -10,10 +10,7 @@
     },
     "dependencies": {
         "apify": "^3.2.2",
-        "cheerio": "^1.0.0",
-        "crawlee": "^3.9.0",
-        "pdf-parse": "^1.1.4",
-        "playwright": "*"
+        "thecrawler": "^0.1.1"
     },
     "devDependencies": {
         "@types/node": "^20.0.0",

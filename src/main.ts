@@ -1,24 +1,24 @@
 import { Actor, log } from 'apify';
-import { scrapeUrls, type ScraperInput, type PageData } from './core.js';
-
-interface Input extends ScraperInput {
-    dryRun?: boolean;
-}
+import { crawlStream, type CrawlOptions, type PageData } from 'thecrawler';
 
 await Actor.init();
 
 try {
-    const input = (await Actor.getInput<Input>()) ?? {} as Input;
+    const input = (await Actor.getInput<CrawlOptions & { dryRun?: boolean }>()) ?? ({} as CrawlOptions);
 
-    if (!input.urls || !Array.isArray(input.urls) || input.urls.length === 0) {
-        throw new Error('Input must contain a non-empty "urls" array.');
+    if (!input.urls?.length && !input.searchQuery && !input.sitemapUrl) {
+        throw new Error('Input must contain "urls" (non-empty array), "searchQuery", or "sitemapUrl".');
     }
 
-    const dryRun = input.dryRun ?? false;
-    log.info('Starting Web Scraper', {
-        urls: input.urls.length,
+    const dryRun = (input as any).dryRun ?? false;
+    log.info('Starting TheCrawler', {
+        urls: input.urls?.length ?? 0,
+        searchQuery: input.searchQuery ?? null,
+        sitemapUrl: input.sitemapUrl ?? null,
         maxDepth: input.maxDepth ?? 0,
         maxPages: input.maxPages ?? 100,
+        usePlaywright: input.usePlaywright ?? false,
+        adaptiveCrawling: input.adaptiveCrawling ?? false,
         dryRun,
     });
 
@@ -26,9 +26,20 @@ try {
     let succeeded = 0;
     let charged = 0;
 
-    const pagesScraped = await scrapeUrls(input, async (data: PageData) => {
-        await Actor.pushData(data);
+    const opts: CrawlOptions = {
+        ...input,
+        onStoreValue: async (key, buffer, contentType) => {
+            await Actor.setValue(key, buffer, { contentType });
+            return key;
+        },
+        logger: {
+            info: (m, d) => log.info(m, d),
+            error: (m, d) => log.error(m, d),
+        },
+    };
 
+    const pagesScraped = await crawlStream(opts, async (data: PageData) => {
+        await Actor.pushData(data);
         if (data.status === 'success') {
             succeeded++;
             if (!dryRun && succeeded > FREE_TIER_LIMIT) {
