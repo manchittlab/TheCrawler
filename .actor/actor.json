@@ -1,8 +1,8 @@
 {
     "actorSpecification": 1,
     "name": "the-crawler",
-    "title": "TheCrawler — Scrape Everything from Any Page",
-    "description": "Scrape any webpage with JS rendering (Playwright) or fast HTTP (Cheerio). Extract text, links, images, meta, headings, tables, JSON-LD, emails, phones, OG/Twitter cards, social links. LLM-ready markdown with heading-aware chunking. CSS selectors, recursive crawling, URL filtering. $0.003/page.",
+    "title": "TheCrawler — AI-ready scraper with LLM-powered structured extraction",
+    "description": "Web scraper + LLM-powered structured extraction in one actor. Crawl + parse + extract typed JSON via any OpenAI-compatible LLM (llama.cpp, vLLM, LM Studio, Ollama, OpenAI). Adaptive Cheerio→Playwright (saves cost on static sites). Out-of-box extractors: JSON-LD, microdata, commerce data (price/SKU/rating), forms, 16 analytics trackers, hreflang, redirect chain. Heading-aware RAG chunking. Structured errors (errorType + retryable, agent-friendly). UA rotation + anti-bot challenge detection. PDF + DOCX. Open source (AGPL-3.0).",
     "version": "0.1",
     "buildTag": "latest",
     "environmentVariables": {},

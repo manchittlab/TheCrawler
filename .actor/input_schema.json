@@ -200,6 +200,96 @@
             "description": "Scrape pages but don't charge.",
             "default": false,
             "editor": "checkbox"
+        },
+        "requestRetries": {
+            "title": "Request Retries",
+            "type": "integer",
+            "description": "Retry transient failures (5xx, network, timeout) this many times before marking the page failed. Permanent failures (404, parse) are not retried.",
+            "default": 3,
+            "minimum": 0,
+            "maximum": 10,
+            "editor": "number",
+            "sectionCaption": "Reliability"
+        },
+        "requestTimeoutSecs": {
+            "title": "Request Timeout (seconds)",
+            "type": "integer",
+            "description": "Per-request timeout in seconds.",
+            "default": 30,
+            "minimum": 5,
+            "maximum": 300,
+            "editor": "number"
+        },
+        "rotateUserAgent": {
+            "title": "Rotate User-Agent",
+            "type": "boolean",
+            "description": "Rotate User-Agent from a real-browser pool (Chrome / Firefox / Safari) per request. Reduces basic anti-bot WAF detection.",
+            "default": true,
+            "editor": "checkbox"
+        },
+        "cacheEnabled": {
+            "title": "Cache Results (5min TTL)",
+            "type": "boolean",
+            "description": "Cache page results in-memory keyed by (URL + extract-flags). Same URL within 5 minutes returns cached data with fromCache:true. Useful when the same URLs may appear multiple times in one run (e.g., recursive crawl with shared external pages).",
+            "default": false,
+            "editor": "checkbox"
+        },
+        "extractMode": {
+            "title": "Extract Mode (LLM-powered structured extraction)",
+            "type": "boolean",
+            "description": "Switch from plain crawl to LLM-powered structured extraction. The actor crawls each URL, cleans to markdown, and asks an OpenAI-compatible LLM to return ONLY a JSON object matching your schema/prompt. Output is the parsed typed data per URL — not raw markdown. Requires extractJsonSchema or extractPrompt below, plus llmBaseUrl + llmModel (or matching Actor environment variables).",
+            "default": false,
+            "editor": "checkbox",
+            "sectionCaption": "LLM-Powered Structured Extraction (Beta)"
+        },
+        "extractJsonSchema": {
+            "title": "Extract: JSON Schema",
+            "type": "object",
+            "description": "JSON Schema describing the desired typed output. The LLM is instructed to return JSON matching this. Either this or extractPrompt is required when extractMode=true. Example: {\"type\":\"object\",\"properties\":{\"productName\":{\"type\":\"string\"},\"price\":{\"type\":\"number\"}},\"required\":[\"productName\"]}",
+            "editor": "json"
+        },
+        "extractPrompt": {
+            "title": "Extract: Natural-language Instruction",
+            "type": "string",
+            "description": "Natural-language extraction instruction (e.g., 'Extract the product name, price, currency, availability'). Used alongside or instead of the JSON schema.",
+            "editor": "textarea"
+        },
+        "llmBaseUrl": {
+            "title": "LLM Endpoint URL",
+            "type": "string",
+            "description": "OpenAI-compatible chat-completions URL. Examples: https://api.openai.com/v1/chat/completions, http://your-llm-host:8080/v1/chat/completions. If left blank, the actor reads THECRAWLER_LLM_BASEURL from the Actor environment variables.",
+            "editor": "textfield"
+        },
+        "llmModel": {
+            "title": "LLM Model",
+            "type": "string",
+            "description": "Model name string the endpoint expects (e.g., gpt-4o-mini, or a .gguf filename for llama.cpp). If blank, reads THECRAWLER_LLM_MODEL env var. The LLM API key (if any) is read from THECRAWLER_LLM_API_KEY Actor env var, never from input — keeps secrets out of run history.",
+            "editor": "textfield"
+        },
+        "llmTemperature": {
+            "title": "LLM Temperature",
+            "type": "string",
+            "description": "Inference temperature as a decimal string ('0', '0.7', '1.0'). 0 is recommended for deterministic extraction. (String editor used because Apify input fields don't natively support floats with custom precision.)",
+            "default": "0",
+            "editor": "textfield"
+        },
+        "llmMaxTokens": {
+            "title": "LLM Max Output Tokens",
+            "type": "integer",
+            "description": "Maximum tokens the LLM may return in the JSON response.",
+            "default": 4000,
+            "minimum": 100,
+            "maximum": 32000,
+            "editor": "number"
+        },
+        "llmMarkdownCharLimit": {
+            "title": "Markdown Character Limit Sent to LLM",
+            "type": "integer",
+            "description": "How much of the page markdown to send to the LLM. Default 30000 chars (≈7.5k tokens). Bigger = more context but slower and more $$ on hosted APIs.",
+            "default": 30000,
+            "minimum": 1000,
+            "maximum": 200000,
+            "editor": "number"
         }
     },
     "required": ["urls"]
