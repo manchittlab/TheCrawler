@@ -1,109 +1,111 @@
-# Universal Web Scraper — Extract Everything from Any Page
+# TheCrawler — AI-ready web scraper with LLM-powered structured extraction
 
-Scrape any webpage and extract every data point: text content, links, images, meta tags, headings (h1-h6), HTML tables, JSON-LD structured data, email addresses, and phone numbers. CSS selector targeting for specific content. Recursive crawling to follow internal links. $0.003/page.
+Scrape any URL and get rich structured data, or extract typed JSON via your own LLM in one call. Open source (AGPL-3.0). $0.005 per page.
 
----
+## What makes this different
 
-## What it extracts per page
+- **LLM-powered extraction**: send a JSON Schema, get parsed typed data back. Endpoint-agnostic — point at OpenAI, your own llama.cpp / vLLM / LM Studio / Ollama. You bring the LLM, no vendor lock-in.
+- **Adaptive crawling**: Cheerio first (fast HTTP+parse), auto-fall-back to Playwright when an SPA shell is detected. Saves real cost on static sites — competitors render JS on every page.
+- **Structured errors**: `errorType` enum (`dns | timeout | rate-limit | blocked-bot | js-required | http-4xx | http-5xx | parse | network | unknown`) + `errorRetryable` boolean. Agents branch programmatically — no regex on error strings.
+- **Anti-bot detection**: 200 OK responses with Cloudflare/WAF challenge bodies are flagged as `errorType: 'blocked-bot'` instead of returning the challenge HTML.
+- **Out-of-box extractors**: JSON-LD, microdata, commerce data (price/SKU/rating), forms with field types, 16 analytics trackers detected (GA4, GTM, Meta Pixel, Hotjar, Segment, Mixpanel, etc.), hreflang, pagination, redirect chain. Both Firecrawl and the standard Apify Web Scraper require user-written code for any of these.
+- **Heading-aware RAG chunking**: markdown chunked at h1-h3 boundaries with overlap and per-chunk SHA. Feed straight to a vector DB.
 
-| Data | Description |
-|------|-------------|
-| **Text** | All visible text (scripts/styles stripped), up to 50K chars |
-| **Links** | Every `<a>` tag — href, anchor text, internal/external flag |
-| **Images** | Every `<img>` — src, alt text, width, height |
-| **Meta tags** | All `<meta>` — description, og:title, keywords, robots, etc |
-| **Headings** | All h1-h6 with level and text |
-| **Tables** | HTML tables as structured arrays (headers + rows) |
-| **JSON-LD** | Schema.org structured data from `<script type="application/ld+json">` |
-| **Emails** | Email addresses found anywhere in the HTML |
-| **Phones** | Phone numbers (7+ digits) found in the HTML |
-| **Selected** | Content matching your CSS selector |
+## Two modes
 
-Every extraction type can be toggled on/off.
+### Plain crawl (default)
 
----
-
-## Quick start
-
-Scrape a single page:
 ```json
 {
-    "urls": ["https://example.com"]
+  "urls": ["https://example.com"],
+  "extractMarkdown": true,
+  "rotateUserAgent": true,
+  "requestRetries": 3
 }
 ```
 
-Crawl a site (follow links):
+Returns rich `PageData` per URL: title, description, language, canonical URL, robots directives, full text, boilerplate-stripped markdown, links (with internal/external flag), images (with lazy-load src), meta tags, OG/Twitter Card, JSON-LD, microdata, commerce data, forms, analytics-detected, emails, phones, social links, hreflang, pagination, redirect chain, response headers + timing, plus structured `errorType` + `errorRetryable` on failure.
+
+### LLM-powered extract mode
+
 ```json
 {
-    "urls": ["https://example.com"],
-    "maxDepth": 2,
-    "maxPages": 50
+  "urls": ["https://shop.example.com/products/123"],
+  "extractMode": true,
+  "extractJsonSchema": {
+    "type": "object",
+    "properties": {
+      "productName": { "type": "string" },
+      "price": { "type": "number" },
+      "currency": { "type": "string" },
+      "inStock": { "type": "boolean" }
+    },
+    "required": ["productName"]
+  },
+  "llmBaseUrl": "https://api.openai.com/v1/chat/completions",
+  "llmModel": "gpt-4o-mini"
 }
 ```
 
-Target specific content:
+Crawls the URL → cleans to markdown → sends `(markdown + schema)` to your OpenAI-compatible chat-completions endpoint with `response_format: { type: 'json_object' }` → returns parsed typed data per URL. Supports natural-language `extractPrompt` instead of/alongside the schema. The actor charges per page like normal; the LLM call cost is whatever your endpoint charges.
+
+> **Note**: extract mode requires a publicly-reachable LLM endpoint. LAN URLs (e.g. `http://192.168.x.x`) are not reachable from Apify infrastructure. Use OpenAI, hosted vLLM, or expose your local server via a tunnel.
+
+> Set `THECRAWLER_LLM_API_KEY` as an Actor environment variable so the LLM key never lands in run inputs (visible in run history).
+
+## Reliability features
+
+| Feature | Default | Why |
+|---|---|---|
+| `requestRetries` | 3 | Transient failures (5xx, network, timeout) auto-retried |
+| `requestTimeoutSecs` | 30 | Cap on per-request time |
+| `rotateUserAgent` | true | Cycles through 6 real-browser UA strings |
+| `cacheEnabled` | false | Opt-in 5-min in-memory LRU per (URL + extract-flags) |
+| Anti-bot challenge detection | always on | Flags Cloudflare/WAF challenge bodies as `errorType: 'blocked-bot'` |
+| Adaptive crawl | opt-in | `adaptiveCrawling: true` tries Cheerio first, escalates to Playwright on SPA detection |
+
+## Search → scrape
+
+Top-N Google results crawled in one call. Optional SerpAPI key for reliable search.
+
 ```json
-{
-    "urls": ["https://example.com"],
-    "cssSelector": ".main-content"
-}
+{ "searchQuery": "best CRM 2026", "searchLimit": 10, "extractMarkdown": true }
 ```
 
----
+## Sitemap → scrape
 
-## Input
+Sitemap.xml + sitemap-index files resolved automatically.
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `urls` | array | _(required)_ | URLs to scrape |
-| `extractText` | boolean | `true` | Visible text content |
-| `extractLinks` | boolean | `true` | All links with anchor text |
-| `extractImages` | boolean | `true` | All images with alt/dimensions |
-| `extractMeta` | boolean | `true` | Meta tags |
-| `extractHeadings` | boolean | `true` | h1-h6 headings |
-| `extractTables` | boolean | `true` | HTML tables as arrays |
-| `extractStructuredData` | boolean | `true` | JSON-LD schema.org data |
-| `extractEmails` | boolean | `true` | Email addresses |
-| `extractPhones` | boolean | `true` | Phone numbers |
-| `cssSelector` | string | _(optional)_ | Target specific element |
-| `maxDepth` | integer | `0` | 0 = listed URLs only. 1+ = follow links |
-| `maxPages` | integer | `100` | Max pages to scrape total |
-| `dryRun` | boolean | `false` | Scrape without charges |
+```json
+{ "sitemapUrl": "https://example.com/sitemap.xml", "maxPages": 50 }
+```
 
----
+## File extraction
+
+PDF and DOCX URLs are auto-detected and parsed. Returns extracted text + (for PDFs) metadata, page count.
 
 ## Pricing
 
-**$0.003 per page scraped** (pay-per-event pricing).
+- **Crawl mode**: $0.005 per page successfully scraped (failed pages don't charge).
+- **Extract mode**: $0.005 per page now; will become $0.02 per page on/after 2026-05-30 (separate event for the higher LLM-inference compute, gated by Apify's pricing-cooldown rules).
 
-- Errors and dry runs are never charged.
-- 100 pages = $0.30
-- 1,000 pages = $3.00
+## Beyond the Apify Store
 
----
+The same engine ships as the open-source `thecrawler` npm package — drop into your own Node project, MCP server, CLI, or REST API server. Self-hosted = $0 per call.
 
-## Performance
+```bash
+# Library
+npm install thecrawler
 
-- Uses CheerioCrawler — pure HTTP, no headless browser
-- Fast: 100-500 pages/minute depending on target site
-- Low memory: 256MB handles most scraping jobs
+# CLI
+thecrawler crawl https://example.com --markdown
+thecrawler extract https://example.com --schema '{...}'
 
----
+# MCP server (Claude Code, Cursor, Windsurf)
+npx -p thecrawler thecrawler-mcp
 
-## Limitations
+# REST API server
+npx -p thecrawler thecrawler-api --port 3000
+```
 
-- **No JavaScript rendering.** This scraper reads the initial HTML response. Content injected by JavaScript (React, Vue, Angular SPAs) won't be captured. For JS-heavy sites, use a Playwright-based scraper.
-- **Email/phone extraction** uses regex — may include false positives from code snippets or malformed patterns.
-- **Tables** are extracted as flat text arrays. Complex nested tables may not parse correctly.
-- **Rate limiting.** Crawlee handles basic rate limiting, but aggressive crawling may trigger bot protection.
-
----
-
-## Related Tools by manchittlab
-
-- **[Broken Link Checker](https://apify.com/accurate_pouch/broken-link-checker)** — Find broken links across your website.
-- **[Email Validator Pro](https://apify.com/accurate_pouch/email-validator)** — Validate extracted emails with SMTP check.
-- **[Tech Stack Detector](https://apify.com/accurate_pouch/tech-stack-detector)** — Detect what technology a site uses.
-- **[Lighthouse Auditor](https://apify.com/accurate_pouch/lighthouse-auditor)** — Performance and SEO audits.
-- **[Sitemap Analyzer](https://apify.com/accurate_pouch/sitemap-analyzer)** — Parse and validate XML sitemaps.
-- **[DNS/WHOIS Suite](https://apify.com/accurate_pouch/dns-whois-suite)** — DNS records + RDAP domain lookup.
+GitHub: https://github.com/manchittlab/TheCrawler · License: AGPL-3.0
