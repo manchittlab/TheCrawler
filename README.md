@@ -1,17 +1,19 @@
-# TheCrawler — AI-ready web scraper with LLM-powered structured extraction
+# TheCrawler — AI-ready web scraper with validated extraction contracts
 
-Scrape any URL and get rich structured data, or extract typed JSON via your own LLM in one call. Open source (AGPL-3.0). $0.005 per page.
+Scrape web pages, run LLM-powered structured extraction, or diagnose whether URLs are ready for a built-in extraction contract before spending LLM tokens. Open source engine (AGPL-3.0). $0.005 per successfully scraped page.
 
 ## What makes this different
 
-- **LLM-powered extraction**: send a JSON Schema, get parsed typed data back. Endpoint-agnostic — point at OpenAI, your own llama.cpp / vLLM / LM Studio / Ollama. You bring the LLM, no vendor lock-in.
-- **Adaptive crawling**: Cheerio first (fast HTTP+parse), auto-fall-back to Playwright when an SPA shell is detected. Saves real cost on static sites — competitors render JS on every page.
+- **Validated extraction contracts**: select a built-in contract, get normalized data plus `validation.valid`, required fields, and missing-field evidence. First contract: `real-estate-listing`.
+- **No-LLM diagnostics**: run `diagnoseMode` to score source readiness, identify blockers, and save a buyer-readable Markdown report before extraction.
+- **LLM-powered extraction**: send a JSON Schema or use a contract, get parsed typed data back. Endpoint-agnostic — point at OpenAI, your own llama.cpp / vLLM / LM Studio / Ollama. You bring the LLM, no vendor lock-in.
+- **Adaptive crawling**: Cheerio first (fast HTTP+parse), auto-fall-back to Playwright when an SPA shell is detected. Keeps browser rendering optional instead of mandatory for every page.
 - **Structured errors**: `errorType` enum (`dns | timeout | rate-limit | blocked-bot | js-required | http-4xx | http-5xx | parse | network | unknown`) + `errorRetryable` boolean. Agents branch programmatically — no regex on error strings.
 - **Anti-bot detection**: 200 OK responses with Cloudflare/WAF challenge bodies are flagged as `errorType: 'blocked-bot'` instead of returning the challenge HTML.
-- **Out-of-box extractors**: JSON-LD, microdata, commerce data (price/SKU/rating), forms with field types, 16 analytics trackers detected (GA4, GTM, Meta Pixel, Hotjar, Segment, Mixpanel, etc.), hreflang, pagination, redirect chain. Both Firecrawl and the standard Apify Web Scraper require user-written code for any of these.
+- **Out-of-box extractors**: JSON-LD, microdata, commerce data (price/SKU/rating), forms with field types, 16 analytics trackers detected (GA4, GTM, Meta Pixel, Hotjar, Segment, Mixpanel, etc.), hreflang, pagination, redirect chain.
 - **Heading-aware RAG chunking**: markdown chunked at h1-h3 boundaries with overlap and per-chunk SHA. Feed straight to a vector DB.
 
-## Two modes
+## Three modes
 
 ### Plain crawl (default)
 
@@ -47,11 +49,38 @@ Returns rich `PageData` per URL: title, description, language, canonical URL, ro
 }
 ```
 
-Crawls the URL → cleans to markdown → sends `(markdown + schema)` to your OpenAI-compatible chat-completions endpoint with `response_format: { type: 'json_object' }` → returns parsed typed data per URL. Supports natural-language `extractPrompt` instead of/alongside the schema. The actor charges per page like normal; the LLM call cost is whatever your endpoint charges.
+Crawls the URL → cleans to markdown → sends `(markdown + schema)` to your OpenAI-compatible chat-completions endpoint → returns parsed typed data per URL. Schema-backed extraction uses JSON Schema response format where supported, with fallbacks for endpoints that only support JSON-object or text output. Supports natural-language `extractPrompt` instead of/alongside the schema. The actor charges per page like normal; the LLM call cost is whatever your endpoint charges.
 
 > **Note**: extract mode requires a publicly-reachable LLM endpoint. LAN URLs (e.g. `http://192.168.x.x`) are not reachable from Apify infrastructure. Use OpenAI, hosted vLLM, or expose your local server via a tunnel.
 
 > Set `THECRAWLER_LLM_API_KEY` as an Actor environment variable so the LLM key never lands in run inputs (visible in run history).
+
+### Contract diagnostic mode
+
+```json
+{
+  "urls": ["https://example.com/listing-1", "https://example.com/listing-2"],
+  "diagnoseMode": true,
+  "extractContract": "real-estate-listing",
+  "diagnosticReport": true
+}
+```
+
+Runs crawl + readiness scoring without an LLM call. Dataset output includes per-URL `verdict`, `readyForExtraction`, `score`, `blockers`, `warnings`, and `recommendedNextStep`, plus a workflow summary. When `diagnosticReport` is true, the actor saves `contract-diagnostic-report` in the run key-value store as Markdown. The report intentionally excludes raw extracted contact details.
+
+### Contract extract mode
+
+```json
+{
+  "urls": ["https://example.com/listing-1"],
+  "extractMode": true,
+  "extractContract": "real-estate-listing",
+  "llmBaseUrl": "https://api.openai.com/v1/chat/completions",
+  "llmModel": "gpt-4o-mini"
+}
+```
+
+Uses the selected contract schema and prompt, then appends contract validation to the extraction result. Agents can branch on `validation.valid` and `validation.missingRequiredFields` instead of trusting loose markdown.
 
 ## Reliability features
 
@@ -87,11 +116,11 @@ PDF and DOCX URLs are auto-detected and parsed. Returns extracted text + (for PD
 ## Pricing
 
 - **Crawl mode**: $0.005 per page successfully scraped (failed pages don't charge).
-- **Extract mode**: $0.005 per page now; will become $0.02 per page on/after 2026-05-30 (separate event for the higher LLM-inference compute, gated by Apify's pricing-cooldown rules).
+- **Extract mode / diagnostic mode**: still charged per successfully scraped page. LLM endpoint cost is paid by the endpoint owner, not by this actor.
 
 ## Beyond the Apify Store
 
-The same engine ships as the open-source `thecrawler` npm package — drop into your own Node project, MCP server, CLI, or REST API server. Self-hosted = $0 per call.
+The same engine ships as the open-source `thecrawler` npm package. The TypeScript source snapshot for this actor build is in `engine/`; drop it into your own Node project, MCP server, CLI, or REST API server. Self-hosting avoids Apify per-page charges, while your own infrastructure and LLM endpoint costs still apply.
 
 ```bash
 # Library

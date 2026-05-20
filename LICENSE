@@ -667,7 +667,7 @@ For more information on this, and how to apply and follow the GNU AGPL, see
 ADDITIONAL PERMISSIONS UNDER GNU AGPL VERSION 3 SECTION 7
 ===============================================================================
 
-Copyright (C) 2026 Manchit Sanan <manchitsanan@gmail.com>
+Copyright (C) 2026 miAIbot
 
 If you modify this Program, or any covered work, by linking or combining
 it with other code, the resulting work is also subject to the AGPL.
@@ -677,4 +677,4 @@ As a special exception, if you use this software as a hosted service
 source code of the service available under the AGPL.
 
 For commercial licensing (closed-source use, OEM, or embedding without
-AGPL obligations), contact: manchitsanan@gmail.com
+AGPL obligations), contact through the GitHub repository.

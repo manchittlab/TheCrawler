@@ -1,8 +1,8 @@
 {
     "actorSpecification": 1,
     "name": "the-crawler",
-    "title": "TheCrawler — AI-ready scraper with LLM-powered structured extraction",
-    "description": "Web scraper + LLM-powered structured extraction in one actor. Crawl + parse + extract typed JSON via any OpenAI-compatible LLM (llama.cpp, vLLM, LM Studio, Ollama, OpenAI). Adaptive Cheerio→Playwright (saves cost on static sites). Out-of-box extractors: JSON-LD, microdata, commerce data (price/SKU/rating), forms, 16 analytics trackers, hreflang, redirect chain. Heading-aware RAG chunking. Structured errors (errorType + retryable, agent-friendly). UA rotation + anti-bot challenge detection. PDF + DOCX. Open source (AGPL-3.0).",
+    "title": "TheCrawler — validated web extraction contracts for AI agents",
+    "description": "Crawl pages, diagnose whether a source is ready for contract extraction, and extract typed JSON with validation evidence. Built-in real-estate-listing contract checks required fields, reports blockers before spending LLM tokens, and can write a buyer-readable diagnostic report. Also supports plain crawl output, markdown, heading-aware chunks, JSON-LD, microdata, commerce data, forms, analytics tracker detection, hreflang, redirects, structured errors, retryability, adaptive Cheerio-to-Playwright crawling, PDF, and DOCX. Open source engine (AGPL-3.0).",
     "version": "0.1",
     "buildTag": "latest",
     "environmentVariables": {},

@@ -1,0 +1,171 @@
+# TheCrawler
+
+Web scraper + validated extraction contracts for AI agents. PDF/DOCX, markdown, JSON-LD/microdata/commerce/forms/analytics-detection, no-LLM readiness diagnostics, structured errors, UA rotation, retry/timeout, optional in-memory cache. Adaptive Cheerio→Playwright. Open source, AGPL-3.0.
+
+## Install
+
+```bash
+npm install thecrawler
+```
+
+Or from a local checkout:
+
+```bash
+npm install file:/path/to/TheCrawler/engine
+```
+
+## Library use
+
+```js
+import { crawl, extract } from 'thecrawler';
+
+// Plain crawl
+const r = await crawl({
+    urls: ['https://example.com'],
+    extractMarkdown: true,
+});
+console.log(r.pages[0].markdown);
+
+// Multi-URL with reliability options
+const r2 = await crawl({
+    urls: ['https://...', 'https://...'],
+    extractMarkdown: true,
+    requestRetries: 3,           // retry transient failures
+    requestTimeoutSecs: 30,
+    rotateUserAgent: true,       // rotate from real-browser UA pool
+    cache: { enabled: true, ttlSeconds: 300 },
+});
+
+// Errors are structured. Branch on errorType + retryable.
+for (const p of r2.pages) {
+    if (p.status === 'error') {
+        console.log(p.errorType, p.errorRetryable, p.error);
+        // errorType ∈ 'dns'|'timeout'|'rate-limit'|'blocked-bot'|
+        // 'js-required'|'http-4xx'|'http-5xx'|'parse'|'network'|'unknown'
+    }
+}
+```
+
+## LLM-powered structured extraction
+
+Crawls a URL, sends the cleaned markdown to an OpenAI-compatible LLM endpoint with a JSON schema or natural-language prompt, returns parsed typed data. Endpoint-agnostic: works against `llama.cpp`'s `llama-server`, `vLLM`, `LM Studio`, `Ollama`, OpenAI proper, and compatible `/v1/chat/completions` endpoints. Schema-backed extraction uses JSON Schema response format where supported, with fallbacks for endpoints that only support JSON-object or text output.
+
+```js
+import { extract } from 'thecrawler';
+
+const r = await extract({
+    urls: ['https://shop.example.com/products/123'],
+    jsonSchema: {
+        type: 'object',
+        properties: {
+            productName: { type: 'string' },
+            price: { type: 'number' },
+            currency: { type: 'string' },
+            inStock: { type: 'boolean' },
+        },
+        required: ['productName'],
+    },
+    llm: {
+        baseUrl: 'http://your-llm-host:8080/v1/chat/completions',
+        model: 'your-model-name',
+        // apiKey: 'optional',
+        // temperature: 0,
+        // maxTokens: 4000,
+        // timeoutSecs: 120,
+    },
+});
+
+console.log(r[0].data);
+// { productName: '...', price: 49.99, currency: 'USD', inStock: true }
+```
+
+`ExtractResult` includes parsed `data`, `status`, structured `errorType`, `rawResponse` (for debugging), token usage, and timing breakdown (`crawlMs`, `llmMs`, `responseTimeMs`).
+
+## CLI
+
+```bash
+# Crawl
+thecrawler crawl https://example.com --markdown
+thecrawler crawl https://example.com --retries 5 --timeout 60 --cache
+
+# Search Google + scrape top results
+thecrawler search "your query" --markdown
+
+# Sitemap-driven crawl
+thecrawler sitemap https://example.com/sitemap.xml --markdown
+
+# Markdown shortcut
+thecrawler md https://example.com
+
+# Built-in extraction contract with validation evidence
+thecrawler extract https://example.com/listing \
+  --contract real-estate-listing \
+  --llm-base-url http://localhost:1234/v1/chat/completions \
+  --llm-model local-model \
+  --evidence-output real-estate-evidence.json
+
+# No-LLM contract readiness diagnostic
+thecrawler diagnose https://example.com/listing-1 https://example.com/listing-2 \
+  --contract real-estate-listing \
+  --output real-estate-workflow-diagnostic.json \
+  --report real-estate-workflow-report.md
+```
+
+## Extraction contracts
+
+Contracts turn a crawl into a repeatable, validated output shape for agent workflows. The first built-in contract is `real-estate-listing`, which extracts normalized listing fields such as title, price, location, beds/baths, area, listing type, broker/contact, source URL, confidence, and evidence notes.
+
+Use `thecrawler extract --list-contracts` to list available contracts. Contract mode returns the normal `ExtractResult` plus a `validation` object with `valid`, `requiredFields`, and `missingRequiredFields`, so an agent can branch on extraction quality instead of trusting loose markdown.
+
+Use `thecrawler diagnose <url...> --contract real-estate-listing` before LLM extraction to score whether a source or workflow is ready for contract extraction. The diagnostic does not call an LLM; it crawls each page, checks source signals, and returns per-URL `verdict`, `readyForExtraction`, `score`, `blockers`, `warnings`, `recommendedNextStep`, and signal evidence plus an aggregate workflow summary (`readyUrls`, `blockedUrls`, `workflowVerdict`, `blockersByType`, `recommendedNextStep`). Add `--report report.md` to produce a buyer-readable Markdown report without raw extracted contact details or page evidence.
+
+## MCP server
+
+Five tools: `crawl`, `crawl_markdown`, `search_and_crawl`, `crawl_sitemap`, `extract_structured`.
+
+Add to your MCP client config (Claude Code / Cursor / Windsurf):
+
+```json
+{
+    "mcpServers": {
+        "thecrawler": {
+            "command": "node",
+            "args": ["/path/to/the-crawler-standalone/dist/mcp.js"],
+            "env": {
+                "THECRAWLER_LLM_BASEURL": "http://your-llm-host:8080/v1/chat/completions",
+                "THECRAWLER_LLM_MODEL": "your-model-name"
+            }
+        }
+    }
+}
+```
+
+The env vars set defaults for `extract_structured`; per-call args override.
+
+## REST API server
+
+```bash
+THECRAWLER_API_KEY=secret thecrawler-api --port 3000
+```
+
+Endpoints: `POST /v1/crawl`, `POST /v1/markdown`, `POST /v1/search`, `POST /v1/sitemap`, `GET /v1/health`. All accept the same options as the library.
+
+## What it extracts (out of the box, no extra code)
+
+Per page: title, description, language, canonical URL, robots directives, full text (50K cap), markdown (boilerplate-stripped, GFM), heading-aware chunks, headings (h1-h6), links (with internal/external + rel), images (with lazy-load src), meta tags (incl. OG + Twitter Card), tables, JSON-LD, microdata (itemscope/itemprop), commerce data (price/currency/SKU/rating from JSON-LD Product), forms (action/method/fields), 16 analytics trackers detected (GA4, GTM, Facebook Pixel, Hotjar, Segment, Mixpanel, Amplitude, Heap, Plausible, Matomo, Clarity, LinkedIn, Twitter, Pinterest, TikTok, etc.), emails, phones, social links, hreflang tags, pagination links, redirect chain, response timing, page size.
+
+PDF and DOCX URLs are auto-detected and parsed (text + metadata for PDFs; text + markdown for DOCX).
+
+## Adaptive crawling
+
+Default Cheerio (fast HTTP+parse) — set `usePlaywright: true` for full JS rendering, or `adaptiveCrawling: true` to try Cheerio first and auto-fall-back to Playwright when an SPA shell is detected (text < 200 chars or known SPA root div).
+
+## Anti-bot resilience
+
+User-Agent rotation from a real-browser pool (Chrome/Firefox/Safari, randomized per request). Anti-bot challenge page detection: when a 200 response carries a Cloudflare/WAF challenge body ("checking your browser", "attention required", "cloudflare ray id"), the page is marked `errorType: 'blocked-bot'` rather than silently returning the challenge HTML.
+
+For harder targets, supply `proxyUrl` (any Crawlee-compatible HTTP(S) proxy URL).
+
+## License
+
+AGPL-3.0-or-later. Commercial licensing available — contact through the GitHub repo.

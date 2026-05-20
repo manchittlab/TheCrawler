@@ -1,0 +1,76 @@
+{
+    "name": "thecrawler",
+    "version": "0.3.1",
+    "mcpName": "io.github.manchittlab/thecrawler",
+    "description": "Web scraper + validated extraction contracts for AI agents. Markdown, PDF/DOCX, JSON-LD/microdata/commerce/forms/analytics, structured errors, diagnostics, and LLM extraction to any OpenAI-compatible endpoint.",
+    "type": "module",
+    "main": "dist/index.js",
+    "types": "dist/index.d.ts",
+    "bin": {
+        "thecrawler": "./bin/thecrawler.js",
+        "thecrawler-mcp": "./dist/mcp.js",
+        "thecrawler-api": "./dist/server.js"
+    },
+    "exports": {
+        ".": {
+            "import": "./dist/index.js",
+            "types": "./dist/index.d.ts"
+        }
+    },
+    "scripts": {
+        "build": "tsc",
+        "test": "npm run build && node --test tests/*.test.mjs",
+        "start": "node dist/cli.js",
+        "dev": "tsx src/cli.ts"
+    },
+    "keywords": [
+        "web-scraper",
+        "crawler",
+        "markdown",
+        "llm",
+        "rag",
+        "agents",
+        "extraction-contracts",
+        "diagnostics",
+        "pdf",
+        "docx",
+        "seo",
+        "structured-data"
+    ],
+    "author": "Manchit Sanan",
+    "license": "AGPL-3.0-or-later",
+    "dependencies": {
+        "@modelcontextprotocol/sdk": "^1.29.0",
+        "cheerio": "^1.0.0",
+        "commander": "^12.0.0",
+        "crawlee": "^3.9.0",
+        "google-search-results-nodejs": "^2.1.0",
+        "mammoth": "^1.8.0",
+        "pdf-parse": "^1.1.4",
+        "playwright": "*",
+        "turndown": "^7.2.0",
+        "turndown-plugin-gfm": "^1.0.2"
+    },
+    "devDependencies": {
+        "@types/node": "^20.0.0",
+        "@types/turndown": "^5.0.5",
+        "typescript": "^5.4.0"
+    },
+    "engines": {
+        "node": ">=18.0.0"
+    },
+    "files": [
+        "dist",
+        "bin",
+        "LICENSE",
+        "README.md"
+    ],
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/manchittlab/TheCrawler"
+    },
+    "homepage": "https://miaibot.ai/tools/thecrawler",
+    "bugs": {
+        "url": "https://github.com/manchittlab/TheCrawler/issues"
+    }
+}

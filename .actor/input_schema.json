@@ -1,6 +1,6 @@
 {
-    "title": "Universal Web Scraper Input",
-    "description": "Extract all data from any webpage.",
+    "title": "TheCrawler Input",
+    "description": "Crawl pages, run LLM extraction, or diagnose whether URLs are ready for a validated extraction contract.",
     "type": "object",
     "schemaVersion": 1,
     "properties": {
@@ -234,10 +234,34 @@
             "default": false,
             "editor": "checkbox"
         },
+        "diagnoseMode": {
+            "title": "Diagnostic Mode (no LLM)",
+            "type": "boolean",
+            "description": "Run a contract-readiness diagnostic before LLM extraction. The actor crawls each URL, scores source readiness, and returns verdicts, blockers, warnings, and a recommended next step. Requires urls[].",
+            "default": false,
+            "editor": "checkbox",
+            "sectionCaption": "Validated Extraction Contracts"
+        },
+        "extractContract": {
+            "title": "Extraction Contract",
+            "type": "string",
+            "description": "Built-in contract name for diagnostic or extract mode. Current option: real-estate-listing. In extractMode this supplies the schema and validation rules; in diagnoseMode it supplies the readiness signals.",
+            "default": "real-estate-listing",
+            "editor": "select",
+            "enum": ["real-estate-listing"],
+            "enumTitles": ["Real Estate Listing"]
+        },
+        "diagnosticReport": {
+            "title": "Save Diagnostic Report",
+            "type": "boolean",
+            "description": "When diagnoseMode=true, also save a buyer-readable Markdown report to the run's key-value store as contract-diagnostic-report.",
+            "default": false,
+            "editor": "checkbox"
+        },
         "extractMode": {
             "title": "Extract Mode (LLM-powered structured extraction)",
             "type": "boolean",
-            "description": "Switch from plain crawl to LLM-powered structured extraction. The actor crawls each URL, cleans to markdown, and asks an OpenAI-compatible LLM to return ONLY a JSON object matching your schema/prompt. Output is the parsed typed data per URL — not raw markdown. Requires extractJsonSchema or extractPrompt below, plus llmBaseUrl + llmModel (or matching Actor environment variables).",
+            "description": "Switch from plain crawl to LLM-powered structured extraction. The actor crawls each URL, cleans to markdown, and asks an OpenAI-compatible LLM to return ONLY a JSON object matching your schema/prompt or the selected extraction contract. Output is parsed typed data per URL; contract mode also adds validation.valid and missingRequiredFields. Requires llmBaseUrl + llmModel (or matching Actor environment variables).",
             "default": false,
             "editor": "checkbox",
             "sectionCaption": "LLM-Powered Structured Extraction (Beta)"

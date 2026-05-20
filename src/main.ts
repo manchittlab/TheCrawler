@@ -1,5 +1,17 @@
 import { Actor, log } from 'apify';
-import { crawlStream, extract, type CrawlOptions, type PageData, type ExtractResult } from 'thecrawler';
+import {
+    attachContractValidation,
+    crawlStream,
+    diagnoseContractReadiness,
+    extract,
+    getExtractionContract,
+    renderContractDiagnosticReport,
+    summarizeContractDiagnostics,
+    type ContractDiagnosticResult,
+    type CrawlOptions,
+    type ExtractResult,
+    type PageData,
+} from 'thecrawler';
 
 interface ActorInput extends CrawlOptions {
     dryRun?: boolean;
@@ -9,6 +21,7 @@ interface ActorInput extends CrawlOptions {
     // Extract-mode fields (when extractMode=true, the actor runs LLM extraction
     // instead of plain crawl).
     extractMode?: boolean;
+    extractContract?: string;
     extractJsonSchema?: object;
     extractPrompt?: string;
     llmBaseUrl?: string;
@@ -16,6 +29,9 @@ interface ActorInput extends CrawlOptions {
     llmTemperature?: number | string;
     llmMaxTokens?: number;
     llmMarkdownCharLimit?: number;
+    // Diagnostic mode runs crawl + contract readiness scoring without calling an LLM.
+    diagnoseMode?: boolean;
+    diagnosticReport?: boolean;
 }
 
 await Actor.init();
@@ -32,10 +48,88 @@ try {
     let succeeded = 0;
     let charged = 0;
 
-    if (input.extractMode) {
+    if (input.diagnoseMode) {
+        if (!input.urls?.length) {
+            throw new Error('diagnoseMode requires explicit urls[]. Search/sitemap modes are crawl-only.');
+        }
+        const contract = getExtractionContract(input.extractContract ?? 'real-estate-listing');
+        const diagnostics: ContractDiagnosticResult[] = [];
+
+        log.info('Starting TheCrawler in contract diagnostic mode', {
+            urls: input.urls.length,
+            contract: contract.name,
+            dryRun,
+        });
+
+        const pagesScraped = await crawlStream({
+            ...input,
+            searchQuery: undefined,
+            sitemapUrl: undefined,
+            extractText: true,
+            extractMarkdown: true,
+            extractImages: true,
+            extractStructuredData: true,
+            extractMeta: true,
+            extractHeadings: true,
+            extractLinks: true,
+            extractEmails: false,
+            extractPhones: false,
+            cache: input.cacheEnabled ? { enabled: true } : input.cache,
+            onStoreValue: async (key, buffer, contentType) => {
+                await Actor.setValue(key, buffer, { contentType });
+                return key;
+            },
+            logger: {
+                info: (m, d) => log.info(m, d),
+                error: (m, d) => log.error(m, d),
+            },
+        }, async (page: PageData) => {
+            const diagnostic = diagnoseContractReadiness(contract, page);
+            diagnostics.push(diagnostic);
+            await Actor.pushData({ type: 'contract-diagnostic', ...diagnostic });
+            if (page.status === 'success') {
+                succeeded++;
+                if (!dryRun && succeeded > FREE_TIER_LIMIT) {
+                    await Actor.charge({ eventName: 'page-scraped', count: 1 });
+                    charged++;
+                }
+            }
+        });
+
+        const summary = summarizeContractDiagnostics(diagnostics);
+        await Actor.pushData({
+            type: 'contract-diagnostic-summary',
+            contract: {
+                name: contract.name,
+                domain: contract.domain,
+                version: contract.version,
+            },
+            summary,
+        });
+
+        if (input.diagnosticReport) {
+            const report = renderContractDiagnosticReport({
+                generatedAt: new Date().toISOString(),
+                contract,
+                summary,
+                diagnostics,
+            });
+            await Actor.setValue('contract-diagnostic-report', report, { contentType: 'text/markdown; charset=utf-8' });
+        }
+
+        log.info('Done (diagnose)', {
+            pagesScraped,
+            diagnostics: diagnostics.length,
+            workflowVerdict: summary.workflowVerdict,
+            recommendedNextStep: summary.recommendedNextStep.action,
+            succeeded,
+            charged,
+        });
+    } else if (input.extractMode) {
         // LLM-powered structured extraction path.
-        if (!input.extractJsonSchema && !input.extractPrompt) {
-            throw new Error('extractMode requires either extractJsonSchema or extractPrompt (or both).');
+        const contract = input.extractContract ? getExtractionContract(input.extractContract) : null;
+        if (!contract && !input.extractJsonSchema && !input.extractPrompt) {
+            throw new Error('extractMode requires extractContract, extractJsonSchema, or extractPrompt.');
         }
         const baseUrl = input.llmBaseUrl || process.env.THECRAWLER_LLM_BASEURL || '';
         const model = input.llmModel || process.env.THECRAWLER_LLM_MODEL || '';
@@ -50,16 +144,19 @@ try {
 
         log.info('Starting TheCrawler in extract mode', {
             urls: input.urls.length,
+            contract: contract?.name ?? null,
             llmBaseUrl: baseUrl,
             llmModel: model,
             apiKeyConfigured: Boolean(apiKey),
             dryRun,
         });
 
-        const results: ExtractResult[] = await extract({
+        const baseResults: ExtractResult[] = await extract({
             urls: input.urls,
-            jsonSchema: input.extractJsonSchema,
-            prompt: input.extractPrompt,
+            jsonSchema: contract?.schema ?? input.extractJsonSchema,
+            prompt: contract
+                ? [contract.prompt, input.extractPrompt].filter(Boolean).join(' ')
+                : input.extractPrompt,
             markdownCharLimit: input.llmMarkdownCharLimit ?? 30000,
             crawlOptions: {
                 usePlaywright: input.usePlaywright ?? false,
@@ -79,6 +176,7 @@ try {
                 timeoutSecs: 120,
             },
         });
+        const results = contract ? attachContractValidation(contract, baseResults) : baseResults;
 
         for (const r of results) {
             await Actor.pushData(r);
