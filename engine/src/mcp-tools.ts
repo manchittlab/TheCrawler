@@ -17,6 +17,11 @@ type ToolResponse = {
     isError?: boolean;
 };
 
+const silentLogger = {
+    info: () => undefined,
+    error: () => undefined,
+};
+
 // Default LLM config from env (set in the MCP client's settings).
 // Per-call args still override these.
 const DEFAULT_LLM_BASE_URL = process.env.THECRAWLER_LLM_BASEURL || '';
@@ -59,6 +64,7 @@ function baseCrawlOptions(args: Record<string, unknown>): Omit<CrawlOptions, 'ur
         screenshotFullPage: args.screenshotFullPage as boolean ?? false,
         includeGlobs: args.includeGlobs as string[] | undefined,
         excludeGlobs: args.excludeGlobs as string[] | undefined,
+        logger: silentLogger,
     };
 }
 
@@ -266,6 +272,7 @@ export async function handleMcpToolCall(name: string, args: Record<string, unkno
                     extractText: false, extractLinks: false, extractImages: false,
                     extractHeadings: false, extractTables: false, extractEmails: false, extractPhones: false,
                     chunkSize: args.chunkSize as number ?? 0,
+                    logger: silentLogger,
                     usePlaywright: args.usePlaywright as boolean ?? false,
                     adaptiveCrawling: args.adaptiveCrawling as boolean ?? false,
                     waitForSelector: args.waitForSelector as string | undefined,
@@ -293,6 +300,7 @@ export async function handleMcpToolCall(name: string, args: Record<string, unkno
                     searchLimit: args.limit as number ?? 5,
                     serpApiKey: args.serpApiKey as string | undefined,
                     extractMarkdown: args.extractMarkdown as boolean ?? false,
+                    logger: silentLogger,
                 });
                 return jsonResponse(result);
             }
@@ -310,6 +318,7 @@ export async function handleMcpToolCall(name: string, args: Record<string, unkno
                     sitemapUrl,
                     maxPages: args.maxPages as number ?? 10,
                     extractMarkdown: args.extractMarkdown as boolean ?? false,
+                    logger: silentLogger,
                 });
                 return jsonResponse(result);
             }

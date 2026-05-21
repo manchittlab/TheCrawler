@@ -26,6 +26,8 @@ import { extract } from './extract.js';
 import { getMcpToolDefinitions, handleMcpToolCall } from './mcp-tools.js';
 import type { CrawlOptions, PageData } from './types.js';
 
+process.env.CRAWLEE_LOG_LEVEL = process.env.CRAWLEE_LOG_LEVEL || 'OFF';
+
 const server = new Server(
     { name: 'thecrawler', version: '0.3.1' },
     { capabilities: { tools: {} } },
@@ -36,6 +38,10 @@ const server = new Server(
 const DEFAULT_LLM_BASE_URL = process.env.THECRAWLER_LLM_BASEURL || '';
 const DEFAULT_LLM_MODEL = process.env.THECRAWLER_LLM_MODEL || '';
 const DEFAULT_LLM_API_KEY = process.env.THECRAWLER_LLM_API_KEY || '';
+const silentLogger = {
+    info: () => undefined,
+    error: () => undefined,
+};
 
 /**
  * Wrap an error PageData into the structured MCP error response so the LLM
@@ -184,6 +190,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     requestTimeoutSecs: args?.requestTimeoutSecs as number ?? 30,
                     rotateUserAgent: args?.rotateUserAgent as boolean ?? true,
                     cache: { enabled: (args?.cacheEnabled as boolean) ?? false },
+                    logger: silentLogger,
                 };
                 const result = await crawl(opts);
                 return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
@@ -197,6 +204,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     extractHeadings: false, extractTables: false, extractEmails: false, extractPhones: false,
                     chunkSize: args?.chunkSize as number ?? 0,
                     usePlaywright: args?.usePlaywright as boolean ?? false,
+                    logger: silentLogger,
                 });
                 const page = result.pages[0];
                 if (!page) {
@@ -220,6 +228,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     searchLimit: args?.limit as number ?? 5,
                     serpApiKey: args?.serpApiKey as string | undefined,
                     extractMarkdown: args?.extractMarkdown as boolean ?? false,
+                    logger: silentLogger,
                 });
                 return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
             }
@@ -237,6 +246,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     sitemapUrl,
                     maxPages: args?.maxPages as number ?? 10,
                     extractMarkdown: args?.extractMarkdown as boolean ?? false,
+                    logger: silentLogger,
                 });
                 return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
             }
@@ -263,6 +273,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     markdownCharLimit: args?.markdownCharLimit as number ?? 30000,
                     crawlOptions: {
                         usePlaywright: args?.usePlaywright as boolean ?? false,
+                        logger: silentLogger,
                     },
                     llm: {
                         baseUrl,
