@@ -130,8 +130,9 @@ Add to your MCP client config (Claude Code / Cursor / Windsurf):
     "mcpServers": {
         "thecrawler": {
             "command": "node",
-            "args": ["/path/to/the-crawler-standalone/dist/mcp.js"],
+            "args": ["/path/to/TheCrawler/engine/dist/mcp.js"],
             "env": {
+                "NODE_OPTIONS": "--use-system-ca",
                 "THECRAWLER_LLM_BASEURL": "http://your-llm-host:8080/v1/chat/completions",
                 "THECRAWLER_LLM_MODEL": "your-model-name"
             }

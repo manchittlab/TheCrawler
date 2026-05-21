@@ -133,8 +133,16 @@ thecrawler extract https://example.com --schema '{...}'
 # MCP server (Claude Code, Cursor, Windsurf)
 npx -p thecrawler thecrawler-mcp
 
+# Current GitHub MCP build for Cline Marketplace review
+cd engine
+npm install
+npm run build
+node dist/mcp.js
+
 # REST API server
 npx -p thecrawler thecrawler-api --port 3000
 ```
+
+For Cline setup from a GitHub clone, use [`llms-install.md`](llms-install.md). The current GitHub source may be ahead of the published npm package.
 
 GitHub: https://github.com/manchittlab/TheCrawler · License: AGPL-3.0
