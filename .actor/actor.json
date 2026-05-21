@@ -17,12 +17,18 @@
                 "overview": {
                     "title": "Scraped Pages",
                     "transformation": {
-                        "fields": ["url", "title", "description", "statusCode", "scrapedAt", "status", "error"]
+                        "fields": ["type", "url", "verdict", "readyForExtraction", "score", "recommendedNextStep", "blockers", "title", "description", "statusCode", "scrapedAt", "status", "error"]
                     },
                     "display": {
                         "component": "table",
                         "properties": {
+                            "type": { "label": "Row Type", "format": "text" },
                             "url": { "label": "URL", "format": "text" },
+                            "verdict": { "label": "Verdict", "format": "text" },
+                            "readyForExtraction": { "label": "Ready", "format": "boolean" },
+                            "score": { "label": "Score", "format": "number" },
+                            "recommendedNextStep": { "label": "Next Step", "format": "text" },
+                            "blockers": { "label": "Blockers", "format": "text" },
                             "title": { "label": "Title", "format": "text" },
                             "description": { "label": "Description", "format": "text" },
                             "statusCode": { "label": "HTTP Status", "format": "number" },
