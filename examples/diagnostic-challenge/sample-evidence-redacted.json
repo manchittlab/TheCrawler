@@ -1,0 +1,34 @@
+{
+  "contract": "real-estate-listing",
+  "workflowVerdict": "mixed",
+  "recommendedNextStep": "extract-ready-subset",
+  "summary": {
+    "totalUrls": 2,
+    "readyUrls": 1,
+    "blockedUrls": 1,
+    "failedUrls": 0,
+    "needsReviewUrls": 0,
+    "averageScore": 48
+  },
+  "results": [
+    {
+      "url": "https://www.rightmove.co.uk/property-for-sale/London.html",
+      "verdict": "ready",
+      "readyForExtraction": true,
+      "score": 95,
+      "recommendedNextStep": "run-contract-extraction",
+      "blockers": [],
+      "warnings": []
+    },
+    {
+      "url": "https://www.realtor.com/realestateandhomes-search/Austin_TX",
+      "verdict": "blocked",
+      "readyForExtraction": false,
+      "score": 0,
+      "recommendedNextStep": "retry-with-proxy-or-browser",
+      "blockers": ["rate-limit"],
+      "warnings": []
+    }
+  ],
+  "redactionNote": "This example omits raw page text, raw markdown, raw evidence snippets, and contact fields."
+}

@@ -1,0 +1,8 @@
+{
+  "contract": "real-estate-listing",
+  "urls": [
+    "https://www.rightmove.co.uk/property-for-sale/London.html",
+    "https://www.realtor.com/realestateandhomes-search/Austin_TX"
+  ],
+  "requestedDecision": "Can this public real-estate workflow support contract extraction for an AI agent?"
+}
