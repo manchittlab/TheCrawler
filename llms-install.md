@@ -59,6 +59,9 @@ Add `THECRAWLER_LLM_API_KEY` only if your endpoint requires it. Do not put API k
 
 ## Tools exposed
 
+- `list_extraction_contracts`
+- `diagnose_extraction_contract`
+- `extract_extraction_contract`
 - `crawl`
 - `crawl_markdown`
 - `search_and_crawl`

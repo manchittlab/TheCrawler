@@ -120,27 +120,25 @@ PDF and DOCX URLs are auto-detected and parsed. Returns extracted text + (for PD
 
 ## Beyond the Apify Store
 
-The same engine ships as the open-source `thecrawler` npm package. The TypeScript source snapshot for this actor build is in `engine/`; drop it into your own Node project, MCP server, CLI, or REST API server. Self-hosting avoids Apify per-page charges, while your own infrastructure and LLM endpoint costs still apply.
+The current open-source engine source for this actor build is in `engine/`; drop it into your own Node project, MCP server, CLI, or REST API server. The published npm package may lag this GitHub source until the next npm publish, so use the GitHub-source path below for current validated-contract and MCP tools. Self-hosting avoids Apify per-page charges, while your own infrastructure and LLM endpoint costs still apply.
 
 ```bash
-# Library
-npm install thecrawler
-
-# CLI
-thecrawler crawl https://example.com --markdown
-thecrawler extract https://example.com --schema '{...}'
-
-# MCP server (Claude Code, Cursor, Windsurf)
-npx -p thecrawler thecrawler-mcp
-
-# Current GitHub MCP build for Cline Marketplace review
+# Current GitHub source build
 cd engine
 npm install
 npm run build
+
+# CLI
+node dist/cli.js crawl https://example.com --markdown
+node dist/cli.js extract https://example.com --schema '{...}'
+
+# MCP server (Cline, Claude Code, Cursor, Windsurf)
 node dist/mcp.js
 
-# REST API server
-npx -p thecrawler thecrawler-api --port 3000
+# Published npm package exists, but may lag current GitHub source
+npm install thecrawler
+thecrawler crawl https://example.com --markdown
+thecrawler extract https://example.com --schema '{...}'
 ```
 
 For Cline setup from a GitHub clone, use [`llms-install.md`](llms-install.md). The current GitHub source may be ahead of the published npm package.

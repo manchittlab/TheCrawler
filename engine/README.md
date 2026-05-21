@@ -4,6 +4,17 @@ Web scraper + validated extraction contracts for AI agents. PDF/DOCX, markdown, 
 
 ## Install
 
+Current validated-contract and MCP changes should be installed from this GitHub source until the next npm publish lands:
+
+```bash
+git clone https://github.com/manchittlab/TheCrawler.git
+cd TheCrawler/engine
+npm install
+npm run build
+```
+
+The published npm package exists, but may lag this source build:
+
 ```bash
 npm install thecrawler
 ```
