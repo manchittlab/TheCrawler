@@ -1,8 +1,8 @@
 # TheCrawler — AI-ready web scraper with validated extraction contracts
 
-Scrape web pages, run LLM-powered structured extraction, or diagnose whether URLs are ready for a built-in extraction contract before spending LLM tokens. Open source engine (AGPL-3.0). $0.005 per successfully scraped page.
+Scrape web pages, run LLM-powered structured extraction, or diagnose whether URLs are ready for a built-in extraction contract before spending LLM tokens. Open source engine (AGPL-3.0). $0.005 per successfully scraped page on Apify.
 
-Need to know whether a public source is worth automating? Open a fit check in the [$500 diagnostic challenge](https://github.com/manchittlab/TheCrawler/issues/1) with public URLs and target fields. A small proof pack is in [`examples/diagnostic-challenge`](examples/diagnostic-challenge).
+Start with a safe test: run one public URL with `dryRun: true` on Apify, or clone the current GitHub source and run the local CLI/MCP build from `engine/`. Need to know whether a real public source is worth automating? Open a public fit check in the [$500 diagnostic challenge](https://github.com/manchittlab/TheCrawler/issues/1). A small proof pack is in [`examples/diagnostic-challenge`](examples/diagnostic-challenge).
 
 ## What makes this different
 
@@ -16,6 +16,28 @@ Need to know whether a public source is worth automating? Open a fit check in th
 - **Heading-aware RAG chunking**: markdown chunked at h1-h3 boundaries with overlap and per-chunk SHA. Feed straight to a vector DB.
 
 ## Three modes
+
+### Safe first run
+
+Use `dryRun: true` for an Apify smoke test. The actor crawls the page but does not emit a billing event.
+
+```json
+{
+  "urls": ["https://example.com"],
+  "extractMarkdown": true,
+  "dryRun": true
+}
+```
+
+For the current local MCP/CLI build:
+
+```bash
+git clone https://github.com/manchittlab/TheCrawler.git
+cd TheCrawler/engine
+npm install
+npm run build
+node dist/cli.js crawl https://example.com --markdown
+```
 
 ### Plain crawl (default)
 
@@ -122,7 +144,7 @@ PDF and DOCX URLs are auto-detected and parsed. Returns extracted text + (for PD
 
 ## Beyond the Apify Store
 
-The current open-source engine source for this actor build is in `engine/`; drop it into your own Node project, MCP server, CLI, or REST API server. The published npm package may lag this GitHub source until the next npm publish, so use the GitHub-source path below for current validated-contract and MCP tools. Self-hosting avoids Apify per-page charges, while your own infrastructure and LLM endpoint costs still apply.
+The current open-source engine source for this actor build is in `engine/`; drop it into your own Node project, MCP server, CLI, or REST API server. The published npm package is older than this GitHub source until the next npm publish, so use the GitHub-source path below for current validated-contract and MCP tools. Self-hosting avoids Apify per-page charges, while your own infrastructure and LLM endpoint costs still apply.
 
 ```bash
 # Current GitHub source build
@@ -137,12 +159,12 @@ node dist/cli.js extract https://example.com --schema '{...}'
 # MCP server (Cline, Claude Code, Cursor, Windsurf)
 node dist/mcp.js
 
-# Published npm package exists, but may lag current GitHub source
+# Older npm package; use for plain crawl only until the next publish
 npm install thecrawler
 thecrawler crawl https://example.com --markdown
 thecrawler extract https://example.com --schema '{...}'
 ```
 
-For Cline setup from a GitHub clone, use [`llms-install.md`](llms-install.md). The current GitHub source may be ahead of the published npm package.
+For Cline setup from a GitHub clone, use [`llms-install.md`](llms-install.md). The current GitHub source is the review path for validated contracts and MCP tools until npm is updated.
 
 GitHub: https://github.com/manchittlab/TheCrawler · License: AGPL-3.0

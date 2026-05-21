@@ -2,7 +2,7 @@
 
 This repository contains an Apify actor wrapper at the root and the open-source MCP/CLI engine in `engine/`.
 
-Use the `engine/` folder for local MCP installation.
+Use the `engine/` folder for local MCP installation. The published npm package is still older, so use this GitHub-source path for current validated-contract and MCP tools.
 
 ## Requirements
 
@@ -81,4 +81,4 @@ The MCP server initialized successfully, listed all eight tools, and `crawl_mark
 
 ## Notes
 
-The current public GitHub source includes validated extraction contracts and contract diagnostics. The npm package may lag the GitHub source until the next npm publish, so Cline should install from the GitHub clone path above for the current MCP build.
+The current public GitHub source includes validated extraction contracts and contract diagnostics. The npm package remains `thecrawler@0.1.1` until the next publish, so Cline should install from the GitHub clone path above for the current MCP build.

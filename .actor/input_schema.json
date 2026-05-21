@@ -197,7 +197,7 @@
         "dryRun": {
             "title": "Dry Run",
             "type": "boolean",
-            "description": "Scrape pages but don't charge.",
+            "description": "Use this for your first test run. The actor crawls pages but does not emit an Apify billing event.",
             "default": false,
             "editor": "checkbox"
         },
