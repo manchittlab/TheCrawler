@@ -2,6 +2,8 @@
 
 Scrape web pages, run LLM-powered structured extraction, or diagnose whether URLs are ready for a built-in extraction contract before spending LLM tokens. Open source engine (AGPL-3.0). $0.005 per successfully scraped page.
 
+Need to know whether a public source is worth automating? Open a fit check in the [$500 diagnostic challenge](https://github.com/manchittlab/TheCrawler/issues/1) with public URLs and target fields. A small proof pack is in [`examples/diagnostic-challenge`](examples/diagnostic-challenge).
+
 ## What makes this different
 
 - **Validated extraction contracts**: select a built-in contract, get normalized data plus `validation.valid`, required fields, and missing-field evidence. First contract: `real-estate-listing`.
