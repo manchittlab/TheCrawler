@@ -11,7 +11,7 @@ npm install thecrawler
 Or from a local checkout:
 
 ```bash
-npm install file:/path/to/TheCrawler/engine
+npm install file:/path/to/the-crawler-standalone
 ```
 
 ## Library use
@@ -121,7 +121,7 @@ Use `thecrawler diagnose <url...> --contract real-estate-listing` before LLM ext
 
 ## MCP server
 
-Five tools: `crawl`, `crawl_markdown`, `search_and_crawl`, `crawl_sitemap`, `extract_structured`.
+Eight tools: `crawl`, `crawl_markdown`, `search_and_crawl`, `crawl_sitemap`, `extract_structured`, `list_extraction_contracts`, `diagnose_extraction_contract`, `extract_extraction_contract`.
 
 Add to your MCP client config (Claude Code / Cursor / Windsurf):
 
@@ -130,9 +130,8 @@ Add to your MCP client config (Claude Code / Cursor / Windsurf):
     "mcpServers": {
         "thecrawler": {
             "command": "node",
-            "args": ["/path/to/TheCrawler/engine/dist/mcp.js"],
+            "args": ["/path/to/the-crawler-standalone/dist/mcp.js"],
             "env": {
-                "NODE_OPTIONS": "--use-system-ca",
                 "THECRAWLER_LLM_BASEURL": "http://your-llm-host:8080/v1/chat/completions",
                 "THECRAWLER_LLM_MODEL": "your-model-name"
             }
@@ -141,7 +140,20 @@ Add to your MCP client config (Claude Code / Cursor / Windsurf):
 }
 ```
 
-The env vars set defaults for `extract_structured`; per-call args override.
+The contract tools let an MCP client discover built-in contracts, run a no-LLM readiness diagnostic, and extract with required-field validation:
+
+```json
+{
+    "tool": "diagnose_extraction_contract",
+    "arguments": {
+        "urls": ["https://example.com/listing"],
+        "contractName": "real-estate-listing",
+        "reportMarkdown": true
+    }
+}
+```
+
+The env vars set defaults for `extract_structured` and `extract_extraction_contract`; per-call args override.
 
 ## REST API server
 

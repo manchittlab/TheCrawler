@@ -74,7 +74,7 @@ npm run build
 node dist/mcp.js
 ```
 
-The MCP server initialized successfully, listed all five tools, and `crawl_markdown` returned Markdown for `https://example.com`.
+The MCP server initialized successfully, listed all eight tools, and `crawl_markdown` returned Markdown for `https://example.com`.
 
 ## Notes
 

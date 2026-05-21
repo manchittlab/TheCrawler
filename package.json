@@ -10,7 +10,7 @@
     },
     "dependencies": {
         "apify": "^3.2.2",
-        "thecrawler": "file:./thecrawler-0.3.1-contracts-20260520.tgz"
+        "thecrawler": "file:./thecrawler-0.3.1-mcp-contract-tools-20260521.tgz"
     },
     "devDependencies": {
         "@types/node": "^20.0.0",

@@ -23,10 +23,11 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { crawl, parseSitemap } from './engine.js';
 import { extract } from './extract.js';
+import { getMcpToolDefinitions, handleMcpToolCall } from './mcp-tools.js';
 import type { CrawlOptions, PageData } from './types.js';
 
 const server = new Server(
-    { name: 'thecrawler', version: '0.3.0' },
+    { name: 'thecrawler', version: '0.3.1' },
     { capabilities: { tools: {} } },
 );
 
@@ -60,6 +61,11 @@ function errorResponse(page: PageData) {
 // --- Tool definitions ---
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: [
+        ...getMcpToolDefinitions().filter((tool) => [
+            'list_extraction_contracts',
+            'diagnose_extraction_contract',
+            'extract_extraction_contract',
+        ].includes(tool.name)),
         {
             name: 'crawl',
             description: 'Scrape one or more URLs. Returns rich structured data: title, description, text, markdown, links, images, meta, OG/Twitter cards, JSON-LD, microdata, headings, tables, emails, phones, forms, redirect chain, hreflang, pagination links, commerce data (price/rating/sku from JSON-LD), analytics tracker detection (16 trackers). Auto-handles PDF and DOCX URLs. Default Cheerio (fast HTTP+parse); set usePlaywright=true for JS rendering, or adaptiveCrawling=true to auto-detect SPAs and re-crawl them with Playwright. On failure, returns structured error with errorType (dns|timeout|rate-limit|blocked-bot|js-required|http-4xx|http-5xx|parse|network|unknown) and retryable flag.',
@@ -268,6 +274,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 });
                 return { content: [{ type: 'text', text: JSON.stringify(results, null, 2) }] };
             }
+
+            case 'list_extraction_contracts':
+            case 'diagnose_extraction_contract':
+            case 'extract_extraction_contract':
+                return handleMcpToolCall(name, (args ?? {}) as Record<string, unknown>);
 
             default:
                 return { content: [{ type: 'text', text: JSON.stringify({ ok: false, error: `Unknown tool: ${name}` }) }], isError: true };
