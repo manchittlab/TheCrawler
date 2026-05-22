@@ -107,6 +107,26 @@ function realEstateSignals(page: PageData): ContractDiagnosticSignal[] {
     ];
 }
 
+function productPageSignals(page: PageData): ContractDiagnosticSignal[] {
+    const text = compactText(page);
+    const lower = text.toLowerCase();
+    const pricePattern = /(?:[$£€₹]\s?\d[\d,.]*|\d[\d,.]*\s?(?:usd|gbp|eur|inr|aed|cad|aud|dollars?|pounds?))/i;
+    const productPattern = /\b(?:product|sku|model|brand|item|buy now|add to cart|shopping cart|checkout)\b/i;
+    const availabilityPattern = /\b(?:in stock|out of stock|sold out|available|unavailable|pre[- ]?order|backorder|ships?|delivery|add to cart)\b/i;
+    const ratingPattern = /\b(?:\d(?:\.\d)?\s?(?:stars?|\/5)|reviews?|ratings?)\b/i;
+
+    return [
+        makeSignal('content-volume', text.length >= 500, 20, text.length),
+        makeSignal('title-signal', Boolean(page.title && page.title.trim().length > 8), 10, page.title),
+        makeSignal('price-signal', hasPattern(text, pricePattern) || (page.commerceData ?? []).some((item) => Boolean(item.price)), 20, (text.match(pricePattern)?.[0] ?? (page.commerceData ?? [])[0]?.price ?? null)),
+        makeSignal('product-language', hasPattern(lower, productPattern), 15, (text.match(productPattern)?.[0] ?? null)),
+        makeSignal('availability-signal', hasPattern(lower, availabilityPattern) || (page.commerceData ?? []).some((item) => Boolean(item.availability)), 10, (text.match(availabilityPattern)?.[0] ?? (page.commerceData ?? [])[0]?.availability ?? null)),
+        makeSignal('image-signal', (page.images ?? []).length > 0, 10, (page.images ?? []).length),
+        makeSignal('structured-data-signal', (page.structuredData ?? []).length > 0 || (page.microdata ?? []).length > 0 || (page.commerceData ?? []).length > 0, 10, (page.structuredData ?? []).length + (page.microdata ?? []).length + (page.commerceData ?? []).length),
+        makeSignal('rating-signal', hasPattern(text, ratingPattern) || (page.commerceData ?? []).some((item) => Boolean(item.rating || item.reviewCount)), 5, (text.match(ratingPattern)?.[0] ?? (page.commerceData ?? [])[0]?.rating ?? null)),
+    ];
+}
+
 function genericSignals(page: PageData): ContractDiagnosticSignal[] {
     const text = compactText(page);
     return [
@@ -212,7 +232,9 @@ export function diagnoseContractReadiness(
 
     const signals = contract.name === 'real-estate-listing'
         ? realEstateSignals(page)
-        : genericSignals(page);
+        : contract.name === 'product-page'
+            ? productPageSignals(page)
+            : genericSignals(page);
     const maxScore = signals.reduce((sum, signal) => sum + signal.weight, 0);
     const rawScore = signals.reduce((sum, signal) => sum + (signal.present ? signal.weight : 0), 0);
     const score = maxScore > 0 ? Math.round((rawScore / maxScore) * 100) : 0;

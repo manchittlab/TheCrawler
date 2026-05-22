@@ -19,6 +19,7 @@ test('CLI version matches package version', () => {
 test('CLI lists built-in extraction contracts', () => {
     const output = runCli(['extract', '--list-contracts']);
     assert.match(output, /real-estate-listing/);
+    assert.match(output, /product-page/);
 });
 
 test('extract help exposes contract and evidence options', () => {

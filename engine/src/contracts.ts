@@ -114,8 +114,69 @@ const REAL_ESTATE_LISTING_CONTRACT: ExtractionContract = {
     ].join(' '),
 };
 
+const PRODUCT_PAGE_CONTRACT: ExtractionContract = {
+    name: 'product-page',
+    domain: 'ecommerce',
+    version: '2026-05-22',
+    description: 'Extracts a normalized product record for catalog, price-monitoring, and agent shopping workflows.',
+    requiredFields: ['name', 'price', 'sourceUrl'],
+    schema: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['name', 'price', 'sourceUrl'],
+        properties: {
+            name: { type: ['string', 'null'], description: 'Product name or title visible on the page.' },
+            price: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['amount', 'currency', 'raw'],
+                properties: {
+                    amount: { type: ['number', 'null'], description: 'Numeric price when visible.' },
+                    currency: { type: ['string', 'null'], description: 'ISO currency code or visible currency symbol/name.' },
+                    raw: { type: ['string', 'null'], description: 'Exact visible price text when normalization is uncertain.' },
+                },
+            },
+            availability: { type: ['string', 'null'], description: 'Visible availability or stock status.' },
+            brand: { type: ['string', 'null'], description: 'Visible brand or manufacturer.' },
+            sku: { type: ['string', 'null'], description: 'Visible SKU, model, or product identifier.' },
+            rating: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['value', 'reviewCount', 'raw'],
+                properties: {
+                    value: { type: ['number', 'null'], description: 'Numeric rating when visible.' },
+                    reviewCount: { type: ['number', 'null'], description: 'Visible review count when present.' },
+                    raw: { type: ['string', 'null'], description: 'Exact visible rating/review text.' },
+                },
+            },
+            images: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'Product image URLs visible in extracted page content.',
+            },
+            description: { type: ['string', 'null'], description: 'Concise product description from the page.' },
+            sourceUrl: { type: ['string', 'null'], description: 'Canonical URL for the product page that was extracted.' },
+            confidence: { type: ['number', 'null'], description: '0 to 1 confidence score based only on visible evidence.' },
+            evidenceNotes: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'Short notes citing what was visible, missing, blocked, or ambiguous.',
+            },
+        },
+    },
+    prompt: [
+        'Extract one product record from the page content.',
+        'Use only facts visible in the provided content.',
+        'If the page is a category or search page, extract the first complete product-like record.',
+        'Do not invent missing values. Use null when a field is not visible.',
+        'Set sourceUrl to the input URL or canonical product URL visible in the content.',
+        'Use evidenceNotes to explain missing required fields, blocked content, or ambiguity.',
+    ].join(' '),
+};
+
 const CONTRACTS = new Map<string, ExtractionContract>([
     [REAL_ESTATE_LISTING_CONTRACT.name, REAL_ESTATE_LISTING_CONTRACT],
+    [PRODUCT_PAGE_CONTRACT.name, PRODUCT_PAGE_CONTRACT],
 ]);
 
 export function listExtractionContracts(): string[] {

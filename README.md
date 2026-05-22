@@ -6,7 +6,7 @@ Start with a safe test: run one public URL with `dryRun: true` on Apify, or clon
 
 ## What makes this different
 
-- **Validated extraction contracts**: select a built-in contract, get normalized data plus `validation.valid`, required fields, and missing-field evidence. First contract: `real-estate-listing`.
+- **Validated extraction contracts**: select a built-in contract, get normalized data plus `validation.valid`, required fields, and missing-field evidence. Current contracts: `real-estate-listing`, `product-page`.
 - **No-LLM diagnostics**: run `diagnoseMode` to score source readiness, identify blockers, and save a buyer-readable Markdown report before extraction.
 - **LLM-powered extraction**: send a JSON Schema or use a contract, get parsed typed data back. Endpoint-agnostic — point at OpenAI, your own llama.cpp / vLLM / LM Studio / Ollama. You bring the LLM, no vendor lock-in.
 - **Adaptive crawling**: Cheerio first (fast HTTP+parse), auto-fall-back to Playwright when an SPA shell is detected. Keeps browser rendering optional instead of mandatory for every page.
@@ -98,13 +98,13 @@ Runs crawl + readiness scoring without an LLM call. Dataset output includes per-
 {
   "urls": ["https://example.com/listing-1"],
   "extractMode": true,
-  "extractContract": "real-estate-listing",
+  "extractContract": "product-page",
   "llmBaseUrl": "https://api.openai.com/v1/chat/completions",
   "llmModel": "gpt-4o-mini"
 }
 ```
 
-Uses the selected contract schema and prompt, then appends contract validation to the extraction result. Agents can branch on `validation.valid` and `validation.missingRequiredFields` instead of trusting loose markdown.
+Uses the selected contract schema and prompt, then appends contract validation to the extraction result. Agents can branch on `validation.valid` and `validation.missingRequiredFields` instead of trusting loose markdown. Built-in contracts currently cover `real-estate-listing` and `product-page`.
 
 ## Reliability features
 

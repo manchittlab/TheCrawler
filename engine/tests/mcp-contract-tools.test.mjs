@@ -19,9 +19,9 @@ test('MCP contract list returns discoverable contract metadata', async () => {
     const response = await handleMcpToolCall('list_extraction_contracts', {});
     const payload = JSON.parse(response.content[0].text);
 
-    assert.deepEqual(payload.contracts.map((contract) => contract.name), ['real-estate-listing']);
-    assert.equal(payload.contracts[0].domain, 'real-estate');
-    assert.deepEqual(payload.contracts[0].requiredFields, ['title', 'price', 'location', 'sourceUrl']);
+    assert.deepEqual(payload.contracts.map((contract) => contract.name), ['product-page', 'real-estate-listing']);
+    assert.equal(payload.contracts[0].domain, 'ecommerce');
+    assert.deepEqual(payload.contracts[0].requiredFields, ['name', 'price', 'sourceUrl']);
 });
 
 test('MCP contract extraction reports LLM configuration before crawling', async () => {

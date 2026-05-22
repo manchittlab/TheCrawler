@@ -9,6 +9,7 @@ import {
 } from '../dist/index.js';
 
 const contract = getExtractionContract('real-estate-listing');
+const productContract = getExtractionContract('product-page');
 
 test('diagnostic marks successful content with listing signals as ready', () => {
     const result = diagnoseContractReadiness(contract, {
@@ -35,6 +36,33 @@ test('diagnostic marks successful content with listing signals as ready', () => 
     assert.ok(result.score >= 70);
     assert.deepEqual(result.blockers, []);
     assert.ok(result.signals.some((signal) => signal.name === 'price-signal'));
+});
+
+test('diagnostic marks successful product content as ready', () => {
+    const result = diagnoseContractReadiness(productContract, {
+        url: 'https://example.com/products/headphones',
+        title: 'Noise-cancelling headphones with travel case',
+        status: 'success',
+        errorType: null,
+        errorRetryable: false,
+        markdown: '# Noise-cancelling headphones\n\n$299\n\nIn stock\n\nAdd to cart\n\nThis product page includes brand information, model details, Bluetooth features, battery life, active noise cancellation, shipping information, warranty details, customer review summaries, comparison notes, package contents, and product images. It is presented as a purchasable item with visible price and availability details for catalog extraction.',
+        text: 'Noise-cancelling headphones $299 In stock Add to cart This product page includes brand information, model details, Bluetooth features, battery life, active noise cancellation, shipping information, warranty details, customer review summaries, comparison notes, package contents, and product images. It is presented as a purchasable item with visible price and availability details for catalog extraction.',
+        images: [{ src: 'https://example.com/photo.jpg', alt: 'headphones', width: null, height: null, dataSrc: null, loading: null }],
+        structuredData: [],
+        commerceData: [{ name: 'Noise-cancelling headphones', price: '$299', currency: 'USD', availability: 'InStock', rating: '4.6', reviewCount: '120', brand: 'Example Audio', sku: 'HP-299' }],
+        forms: [],
+        links: [],
+        headings: [{ level: 1, text: 'Noise-cancelling headphones' }],
+        emails: [],
+        phones: [],
+    });
+
+    assert.equal(result.verdict, 'ready');
+    assert.equal(result.readyForExtraction, true);
+    assert.equal(result.recommendedNextStep.action, 'run-contract-extraction');
+    assert.ok(result.score >= 70);
+    assert.ok(result.signals.some((signal) => signal.name === 'price-signal'));
+    assert.ok(result.signals.some((signal) => signal.name === 'availability-signal'));
 });
 
 test('diagnostic marks blocked pages as not ready with branchable blocker', () => {
