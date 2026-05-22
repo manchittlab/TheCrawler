@@ -175,6 +175,7 @@ THECRAWLER_API_KEY=local_test_key thecrawler-api --port 3000
 Endpoints:
 
 - `POST /v1/crawl`
+- `POST /v1/scrape`
 - `POST /v1/markdown`
 - `POST /v1/search`
 - `POST /v1/map`
@@ -196,6 +197,11 @@ curl -X POST http://localhost:3000/v1/diagnose \
   -H "Content-Type: application/json" \
   -d '{"contractName":"product-page","urls":["https://example.com/product"],"reportMarkdown":true}'
 
+curl -X POST http://localhost:3000/v1/scrape \
+  -H "Authorization: Bearer $THECRAWLER_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"url":"https://example.com/product","formats":["markdown","metadata","links","structuredData","commerceData"]}'
+
 curl -X POST http://localhost:3000/v1/map \
   -H "Authorization: Bearer $THECRAWLER_API_KEY" \
   -H "Content-Type: application/json" \
@@ -207,7 +213,7 @@ curl -X POST http://localhost:3000/v1/extract-contract \
   -d '{"contractName":"product-page","urls":["https://example.com/product"],"llmBaseUrl":"http://localhost:1234/v1/chat/completions","llmModel":"qwen/qwen3.5-9b"}'
 ```
 
-`/v1/diagnose` does not call an LLM. `/v1/extract-contract` uses the selected contract schema and returns required-field validation evidence. All extraction claims still depend on the tested URLs and the configured LLM; blocked pages are reported as blockers, not false successes.
+`/v1/scrape` is the one-page API path for selected output formats. `/v1/diagnose` does not call an LLM. `/v1/extract-contract` uses the selected contract schema and returns required-field validation evidence. All extraction claims still depend on the tested URLs and the configured LLM; blocked pages are reported as blockers, not false successes.
 
 ## What it extracts (out of the box, no extra code)
 

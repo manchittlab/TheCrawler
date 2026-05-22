@@ -135,6 +135,25 @@ test('REST API exposes contract discovery and diagnostic-first contract flow', a
         assert.ok(mapPayload.links.some((link) => link.url === `http://127.0.0.1:${fixturePort}/support`));
         assert.ok(mapPayload.links.some((link) => link.url === 'https://example.org/external'));
 
+        const { response: scrapeResponse, payload: scrapePayload } = await postJson(
+            apiPort,
+            '/v1/scrape',
+            apiKey,
+            {
+                url: `http://127.0.0.1:${fixturePort}/product`,
+                formats: ['markdown', 'metadata', 'links', 'structuredData', 'commerceData'],
+            },
+        );
+        assert.equal(scrapeResponse.status, 200);
+        assert.equal(scrapePayload.success, true);
+        assert.equal(scrapePayload.data.url, `http://127.0.0.1:${fixturePort}/product`);
+        assert.match(scrapePayload.data.markdown, /Noise-cancelling headphones/);
+        assert.equal(scrapePayload.data.metadata.title, 'Noise-cancelling headphones with travel case');
+        assert.ok(scrapePayload.data.links.some((link) => link.href === `http://127.0.0.1:${fixturePort}/support`));
+        assert.equal(scrapePayload.data.structuredData[0].name, 'Noise-cancelling headphones');
+        assert.equal(scrapePayload.data.commerceData[0].price, '299');
+        assert.equal(scrapePayload.data.text, undefined);
+
         const { response: diagnoseResponse, payload: diagnostic } = await postJson(
             apiPort,
             '/v1/diagnose',

@@ -163,6 +163,10 @@ node dist/mcp.js
 THECRAWLER_API_KEY=local_test_key node dist/server.js --port 3000
 curl -H "Authorization: Bearer local_test_key" \
   "http://localhost:3000/v1/contracts?includeSchema=true"
+curl -X POST "http://localhost:3000/v1/scrape" \
+  -H "Authorization: Bearer local_test_key" \
+  -H "Content-Type: application/json" \
+  -d '{"url":"https://example.com/product","formats":["markdown","metadata","links","structuredData","commerceData"]}'
 curl -X POST "http://localhost:3000/v1/diagnose" \
   -H "Authorization: Bearer local_test_key" \
   -H "Content-Type: application/json" \

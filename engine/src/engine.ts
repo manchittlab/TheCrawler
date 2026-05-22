@@ -11,7 +11,7 @@
  * - Optional in-memory LRU cache (cache.enabled)
  */
 
-import { CheerioCrawler, PlaywrightCrawler, ProxyConfiguration, type CheerioCrawlingContext, type PlaywrightCrawlingContext } from 'crawlee';
+import { CheerioCrawler, PlaywrightCrawler, ProxyConfiguration, RequestQueue, type CheerioCrawlingContext, type PlaywrightCrawlingContext } from 'crawlee';
 import * as cheerioLib from 'cheerio';
 import { createRequire } from 'node:module';
 import { createHash } from 'node:crypto';
@@ -583,6 +583,7 @@ export async function crawlStream(
 
     const runId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     let requestSeq = 0;
+    const requestQueue = await RequestQueue.open(`thecrawler-${runId}`);
     const makeRequest = (url: string, depth = 0) => {
         const fullUrl = url.startsWith('http') ? url : `https://${url}`;
         return {
@@ -606,6 +607,7 @@ export async function crawlStream(
     if (usePlaywright) {
         const crawler = new PlaywrightCrawler({
             maxRequestsPerCrawl: maxPages, proxyConfiguration,
+            requestQueue,
             maxRequestRetries: requestRetries,
             requestHandlerTimeoutSecs: requestTimeoutSecs,
             preNavigationHooks: [async ({ page: pg }) => {
@@ -658,6 +660,7 @@ export async function crawlStream(
         const spaUrls: string[] = [];
         const crawler = new CheerioCrawler({
             maxRequestsPerCrawl: maxPages, proxyConfiguration,
+            requestQueue,
             maxRequestRetries: requestRetries,
             requestHandlerTimeoutSecs: requestTimeoutSecs,
             additionalMimeTypes: ['application/xml', 'text/xml'],
@@ -701,8 +704,10 @@ export async function crawlStream(
 
         if (spaUrls.length > 0) {
             log.info(`Adaptive: re-scraping ${spaUrls.length} SPA page(s) with Playwright`);
+            const playwrightQueue = await RequestQueue.open(`thecrawler-${runId}-playwright`);
             const pwCrawler = new PlaywrightCrawler({
                 maxRequestsPerCrawl: spaUrls.length, proxyConfiguration,
+                requestQueue: playwrightQueue,
                 maxRequestRetries: requestRetries,
                 requestHandlerTimeoutSecs: requestTimeoutSecs,
                 preNavigationHooks: [async ({ page: pg }) => {

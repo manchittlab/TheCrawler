@@ -9,6 +9,7 @@
  *
  * Endpoints:
  *   POST /v1/crawl      — scrape URLs
+ *   POST /v1/scrape     — scrape one URL into selected formats
  *   POST /v1/markdown    — extract markdown from a URL
  *   POST /v1/search      — search Google + scrape results
  *   POST /v1/map         — discover links from a URL
@@ -85,6 +86,76 @@ function mapDiscoveredLinks(result: CrawlResult) {
         urlCount: links.length,
         links,
     };
+}
+
+const SCRAPE_FORMATS = new Set([
+    'markdown',
+    'text',
+    'metadata',
+    'links',
+    'images',
+    'structuredData',
+    'commerceData',
+    'tables',
+    'forms',
+    'analytics',
+    'emails',
+    'phones',
+    'socialLinks',
+    'chunks',
+]);
+
+function parseScrapeFormats(value: unknown): { formats: Set<string>; unknown: string[]; invalid: boolean } {
+    if (value === undefined) return { formats: new Set(['markdown', 'metadata']), unknown: [], invalid: false };
+    if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) {
+        return { formats: new Set(), unknown: [], invalid: true };
+    }
+    const formats = new Set(value.length > 0 ? value : ['markdown', 'metadata']);
+    const unknown = [...formats].filter((format) => !SCRAPE_FORMATS.has(format));
+    return { formats, unknown, invalid: false };
+}
+
+function buildScrapePayload(page: CrawlResult['pages'][number], formats: Set<string>) {
+    const data: Record<string, unknown> = {
+        url: page.url,
+        status: page.status,
+        statusCode: page.statusCode,
+        contentType: page.contentType,
+        responseTimeMs: page.responseTimeMs,
+        scrapedAt: page.scrapedAt,
+    };
+
+    if (formats.has('metadata')) {
+        data.metadata = {
+            title: page.title,
+            description: page.description,
+            language: page.language,
+            canonicalUrl: page.canonicalUrl,
+            robotsDirectives: page.robotsDirectives,
+            meta: page.meta,
+            openGraph: page.openGraph,
+            twitterCard: page.twitterCard,
+            headings: page.headings,
+            hreflangTags: page.hreflangTags,
+            paginationLinks: page.paginationLinks,
+            redirectChain: page.redirectChain,
+        };
+    }
+    if (formats.has('markdown')) data.markdown = page.markdown;
+    if (formats.has('text')) data.text = page.text;
+    if (formats.has('links')) data.links = page.links;
+    if (formats.has('images')) data.images = page.images;
+    if (formats.has('structuredData')) data.structuredData = page.structuredData;
+    if (formats.has('commerceData')) data.commerceData = page.commerceData;
+    if (formats.has('tables')) data.tables = page.tables;
+    if (formats.has('forms')) data.forms = page.forms;
+    if (formats.has('analytics')) data.analyticsDetected = page.analyticsDetected;
+    if (formats.has('emails')) data.emails = page.emails;
+    if (formats.has('phones')) data.phones = page.phones;
+    if (formats.has('socialLinks')) data.socialLinks = page.socialLinks;
+    if (formats.has('chunks')) data.chunks = page.chunks;
+
+    return data;
 }
 
 const server = createServer(async (req, res) => {
@@ -178,6 +249,66 @@ const server = createServer(async (req, res) => {
             };
             const result = await crawl(opts);
             json(res, 200, result);
+            return;
+        }
+
+        // POST /v1/scrape
+        if (url === '/v1/scrape') {
+            if (!body.url) {
+                json(res, 400, { error: 'Missing required field: url (string)' });
+                return;
+            }
+            const { formats, unknown, invalid } = parseScrapeFormats(body.formats);
+            if (invalid) {
+                json(res, 400, { error: 'formats must be an array of strings', allowedFormats: [...SCRAPE_FORMATS].sort() });
+                return;
+            }
+            if (unknown.length > 0) {
+                json(res, 400, { error: `Unknown scrape format(s): ${unknown.join(', ')}`, allowedFormats: [...SCRAPE_FORMATS].sort() });
+                return;
+            }
+            const needsMetadata = formats.has('metadata');
+            const needsStructuredData = formats.has('structuredData') || formats.has('commerceData');
+            const result = await crawl({
+                urls: [body.url],
+                extractMarkdown: formats.has('markdown') || formats.has('chunks'),
+                extractText: formats.has('text'),
+                extractLinks: formats.has('links'),
+                extractImages: formats.has('images'),
+                extractMeta: needsMetadata,
+                extractHeadings: needsMetadata,
+                extractTables: formats.has('tables'),
+                extractStructuredData: needsStructuredData,
+                extractEmails: formats.has('emails'),
+                extractPhones: formats.has('phones'),
+                stripBoilerplate: body.stripBoilerplate ?? true,
+                chunkSize: body.chunkSize ?? (formats.has('chunks') ? 2000 : 0),
+                chunkOverlap: body.chunkOverlap ?? 200,
+                cssSelector: body.cssSelector,
+                maxPages: 1,
+                usePlaywright: body.usePlaywright ?? false,
+                adaptiveCrawling: body.adaptiveCrawling ?? false,
+                waitForSelector: body.waitForSelector,
+                waitForMs: body.waitForMs ?? 0,
+                actions: body.actions,
+                customHeaders: body.customHeaders,
+                proxyUrl: body.proxyUrl,
+                requestRetries: body.requestRetries ?? 3,
+                requestTimeoutSecs: body.requestTimeoutSecs ?? 30,
+                rotateUserAgent: body.rotateUserAgent ?? true,
+                cache: body.cache,
+            });
+            const page = result.pages[0];
+            if (!page) {
+                json(res, 502, { success: false, error: 'No page result emitted by crawler' });
+                return;
+            }
+            const data = buildScrapePayload(page, formats);
+            json(res, page.status === 'success' ? 200 : 422, {
+                success: page.status === 'success',
+                data,
+                ...(page.status === 'error' ? { error: page.error, errorType: page.errorType, errorRetryable: page.errorRetryable } : {}),
+            });
             return;
         }
 
@@ -434,7 +565,7 @@ const server = createServer(async (req, res) => {
             return;
         }
 
-        json(res, 404, { error: 'Not found. Available endpoints: /v1/crawl, /v1/markdown, /v1/search, /v1/map, /v1/sitemap, /v1/extract, /v1/contracts, /v1/diagnose, /v1/extract-contract, /v1/health' });
+        json(res, 404, { error: 'Not found. Available endpoints: /v1/crawl, /v1/scrape, /v1/markdown, /v1/search, /v1/map, /v1/sitemap, /v1/extract, /v1/contracts, /v1/diagnose, /v1/extract-contract, /v1/health' });
     } catch (err: any) {
         json(res, 500, { error: err.message || 'Internal server error' });
     }
@@ -443,5 +574,5 @@ const server = createServer(async (req, res) => {
 server.listen(PORT, () => {
     console.log(`TheCrawler API server running on http://localhost:${PORT}`);
     console.log(`Auth: ${API_KEY ? 'API key required (THECRAWLER_API_KEY)' : 'open access (set THECRAWLER_API_KEY to secure)'}`);
-    console.log('Endpoints: POST /v1/crawl, /v1/markdown, /v1/search, /v1/map, /v1/sitemap, /v1/extract, /v1/diagnose, /v1/extract-contract | GET /v1/contracts, /v1/health');
+    console.log('Endpoints: POST /v1/crawl, /v1/scrape, /v1/markdown, /v1/search, /v1/map, /v1/sitemap, /v1/extract, /v1/diagnose, /v1/extract-contract | GET /v1/contracts, /v1/health');
 });
