@@ -21,12 +21,26 @@ Reason: 1 of 2 URLs was ready; handle blockers before expanding automation.
 | Needs review | 0 |
 | Average score | 48 |
 
+## Readiness Gaps
+
+| Missing signal | URLs affected |
+|---|---:|
+| bed-bath-signal | 1 |
+| contact-signal | 1 |
+| content-volume | 1 |
+| image-signal | 1 |
+| listing-language | 1 |
+| location-signal | 1 |
+| price-signal | 1 |
+| structured-data-signal | 1 |
+| title-signal | 1 |
+
 ## URL Results
 
-| URL | Verdict | Score | Next step | Blockers | Warnings |
-|---|---|---:|---|---|---|
-| https://www.rightmove.co.uk/property-for-sale/London.html | ready | 95 | run-contract-extraction | none | none |
-| https://www.realtor.com/realestateandhomes-search/Austin_TX | blocked | 0 | retry-with-proxy-or-browser | rate-limit | none |
+| URL | Verdict | Score | Next step | Blockers | Warnings | Missing readiness signals |
+|---|---|---:|---|---|---|---|
+| https://www.rightmove.co.uk/property-for-sale/London.html | ready | 95 | run-contract-extraction | none | none | none |
+| https://www.realtor.com/realestateandhomes-search/Austin_TX | blocked | 0 | retry-with-proxy-or-browser | rate-limit | none | content-volume, title-signal, price-signal, location-signal, bed-bath-signal, listing-language, image-signal, structured-data-signal, contact-signal |
 
 ## Notes
 

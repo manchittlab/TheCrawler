@@ -307,6 +307,22 @@ function mdCell(value: string | number | boolean | null | undefined): string {
     return String(value ?? 'none').replace(/\|/g, '\\|').replace(/\n/g, ' ');
 }
 
+function missingSignalNames(diagnostic: ContractDiagnosticResult): string[] {
+    return diagnostic.signals
+        .filter((signal) => !signal.present)
+        .map((signal) => signal.name);
+}
+
+function countMissingSignals(diagnostics: ContractDiagnosticResult[]): Record<string, number> {
+    const counts: Record<string, number> = {};
+    for (const diagnostic of diagnostics) {
+        for (const name of missingSignalNames(diagnostic)) {
+            counts[name] = (counts[name] ?? 0) + 1;
+        }
+    }
+    return counts;
+}
+
 export function renderContractDiagnosticReport(input: {
     generatedAt: string;
     contract: Pick<ExtractionContract, 'name' | 'domain' | 'version'>;
@@ -335,10 +351,25 @@ export function renderContractDiagnosticReport(input: {
     lines.push(`| Needs review | ${summary.needsReviewUrls} |`);
     lines.push(`| Average score | ${summary.averageScore} |`);
     lines.push('');
+    lines.push('## Readiness Gaps');
+    lines.push('');
+    const missingSignalCounts = countMissingSignals(diagnostics);
+    const missingSignalEntries = Object.entries(missingSignalCounts)
+        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+    if (missingSignalEntries.length === 0) {
+        lines.push('No missing readiness signals across tested URLs.');
+    } else {
+        lines.push('| Missing signal | URLs affected |');
+        lines.push('|---|---:|');
+        for (const [signalName, count] of missingSignalEntries) {
+            lines.push(`| ${mdCell(signalName)} | ${count} |`);
+        }
+    }
+    lines.push('');
     lines.push('## URL Results');
     lines.push('');
-    lines.push('| URL | Verdict | Score | Next step | Blockers | Warnings |');
-    lines.push('|---|---|---:|---|---|---|');
+    lines.push('| URL | Verdict | Score | Next step | Blockers | Warnings | Missing readiness signals |');
+    lines.push('|---|---|---:|---|---|---|---|');
     for (const diagnostic of diagnostics) {
         lines.push([
             mdCell(diagnostic.url),
@@ -347,6 +378,7 @@ export function renderContractDiagnosticReport(input: {
             mdCell(diagnostic.recommendedNextStep.action),
             mdCell(diagnostic.blockers.join(', ') || 'none'),
             mdCell(diagnostic.warnings.join(', ') || 'none'),
+            mdCell(missingSignalNames(diagnostic).join(', ') || 'none'),
         ].join(' | ').replace(/^/, '| ').replace(/$/, ' |'));
     }
     lines.push('');

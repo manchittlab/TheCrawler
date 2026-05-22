@@ -162,6 +162,8 @@ test('diagnostic report renders buyer-readable summary without raw signal eviden
 
     assert.match(report, /TheCrawler Extraction Readiness Report/);
     assert.match(report, /Workflow Verdict/);
+    assert.match(report, /Readiness Gaps/);
+    assert.match(report, /Missing readiness signals/);
     assert.match(report, /run-contract-extraction/);
     assert.match(report, /https:\/\/example\.com\/listing\/ready/);
     assert.doesNotMatch(report, /£450,000/);

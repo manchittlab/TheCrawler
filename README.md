@@ -90,7 +90,7 @@ Crawls the URL → cleans to markdown → sends `(markdown + schema)` to your Op
 }
 ```
 
-Runs crawl + readiness scoring without an LLM call. Dataset output includes per-URL `verdict`, `readyForExtraction`, `score`, `blockers`, `warnings`, and `recommendedNextStep`, plus a workflow summary. When `diagnosticReport` is true, the actor saves `contract-diagnostic-report` in the run key-value store as Markdown. The report intentionally excludes raw extracted contact details.
+Runs crawl + readiness scoring without an LLM call. Dataset output includes per-URL `verdict`, `readyForExtraction`, `score`, `blockers`, `warnings`, and `recommendedNextStep`, plus a workflow summary. When `diagnosticReport` is true, the actor saves `contract-diagnostic-report` in the run key-value store as Markdown with a missing-readiness-signal summary. The report intentionally excludes raw extracted contact details.
 
 ### Contract extract mode
 

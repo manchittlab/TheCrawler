@@ -128,7 +128,7 @@ Contracts turn a crawl into a repeatable, validated output shape for agent workf
 
 Use `thecrawler extract --list-contracts` to list available contracts. Contract mode returns the normal `ExtractResult` plus a `validation` object with `valid`, `requiredFields`, and `missingRequiredFields`, so an agent can branch on extraction quality instead of trusting loose markdown.
 
-Use `thecrawler diagnose <url...> --contract real-estate-listing` before LLM extraction to score whether a source or workflow is ready for contract extraction. The diagnostic does not call an LLM; it crawls each page, checks source signals, and returns per-URL `verdict`, `readyForExtraction`, `score`, `blockers`, `warnings`, `recommendedNextStep`, and signal evidence plus an aggregate workflow summary (`readyUrls`, `blockedUrls`, `workflowVerdict`, `blockersByType`, `recommendedNextStep`). Add `--report report.md` to produce a buyer-readable Markdown report without raw extracted contact details or page evidence.
+Use `thecrawler diagnose <url...> --contract real-estate-listing` before LLM extraction to score whether a source or workflow is ready for contract extraction. The diagnostic does not call an LLM; it crawls each page, checks source signals, and returns per-URL `verdict`, `readyForExtraction`, `score`, `blockers`, `warnings`, `recommendedNextStep`, and signal evidence plus an aggregate workflow summary (`readyUrls`, `blockedUrls`, `workflowVerdict`, `blockersByType`, `recommendedNextStep`). Add `--report report.md` to produce a buyer-readable Markdown report with missing readiness signals, without raw extracted contact details or page evidence.
 
 ## MCP server
 
