@@ -17,6 +17,15 @@ The point is not to claim every site works. The point is to show the useful resu
 - the workflow verdict was `mixed`,
 - the recommended next step was `extract-ready-subset`.
 
+## Proof matrix
+
+| Proof | What passed | What it proves | Limitation |
+|---|---|---|---|
+| Public diagnostic challenge | Rightmove returned ready; Realtor returned rate-limited; workflow verdict was `mixed` | The diagnostic can separate usable sources from blocked sources before extraction work starts | It does not prove every real-estate site works |
+| 5-category local validation | Rightmove, Apple, React.dev, and Framer returned crawl output with text, markdown, and metadata | TheCrawler can produce useful crawl output across real estate, ecommerce, docs, and JavaScript-heavy marketing pages | Raw markdown can be noisy and may need per-site cleanup |
+| Blocked-site check | G2 returned a structured blocked result instead of a false success | A blocked target can be represented as evidence rather than hidden behind empty output | This is not an anti-bot bypass claim |
+| Contract extraction proof | The built-in `real-estate-listing` contract returned required-field validation in local Qwen testing | Contract mode can validate whether required fields are present after extraction | Current npm is stale; use the GitHub source for current contract features |
+
 ## Files
 
 - `sample-input.json` — the workflow shape: public URLs plus target contract.
