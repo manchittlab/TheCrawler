@@ -77,6 +77,9 @@ test('REST API exposes contract discovery and diagnostic-first contract flow', a
             summaries, comparison notes, package contents, product images, and other catalog content
             suitable for product-page extraction workflows. The page repeats enough buyer-facing
             product information for the readiness diagnostic to avoid thin-content behavior.</p>
+            <a href="/products/headphones/reviews">Reviews</a>
+            <a href="/support">Support</a>
+            <a href="https://example.org/external">External reference</a>
             <img src="/headphones.jpg" alt="Noise-cancelling headphones">
         </body>
         </html>`;
@@ -119,6 +122,18 @@ test('REST API exposes contract discovery and diagnostic-first contract flow', a
         );
         assert.equal(missingLlmResponse.status, 400);
         assert.match(missingLlmPayload.error, /Missing LLM config/);
+
+        const { response: mapResponse, payload: mapPayload } = await postJson(
+            apiPort,
+            '/v1/map',
+            apiKey,
+            { url: `http://127.0.0.1:${fixturePort}/product` },
+        );
+        assert.equal(mapResponse.status, 200);
+        assert.equal(mapPayload.sourceUrl, `http://127.0.0.1:${fixturePort}/product`);
+        assert.ok(mapPayload.urlCount >= 3);
+        assert.ok(mapPayload.links.some((link) => link.url === `http://127.0.0.1:${fixturePort}/support`));
+        assert.ok(mapPayload.links.some((link) => link.url === 'https://example.org/external'));
 
         const { response: diagnoseResponse, payload: diagnostic } = await postJson(
             apiPort,

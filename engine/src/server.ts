@@ -11,6 +11,7 @@
  *   POST /v1/crawl      — scrape URLs
  *   POST /v1/markdown    — extract markdown from a URL
  *   POST /v1/search      — search Google + scrape results
+ *   POST /v1/map         — discover links from a URL
  *   POST /v1/sitemap     — crawl from sitemap.xml
  *   POST /v1/extract     — LLM-powered structured extraction
  *   GET  /v1/contracts   — list built-in extraction contracts
@@ -24,7 +25,7 @@ import { crawl, parseSitemap } from './engine.js';
 import { extract } from './extract.js';
 import { attachContractValidation, getExtractionContract, listExtractionContracts } from './contracts.js';
 import { diagnoseContractReadiness, renderContractDiagnosticReport, summarizeContractDiagnostics } from './diagnostics.js';
-import type { CrawlOptions } from './types.js';
+import type { CrawlOptions, CrawlResult } from './types.js';
 
 const DEFAULT_LLM_BASEURL = process.env.THECRAWLER_LLM_BASEURL || '';
 const DEFAULT_LLM_MODEL = process.env.THECRAWLER_LLM_MODEL || '';
@@ -56,6 +57,34 @@ function checkAuth(req: IncomingMessage, res: ServerResponse): boolean {
     if (auth === `Bearer ${API_KEY}`) return true;
     json(res, 401, { error: 'Invalid or missing API key. Set Authorization: Bearer <key>' });
     return false;
+}
+
+function mapDiscoveredLinks(result: CrawlResult) {
+    const seen = new Map<string, { url: string; text: string; isExternal: boolean; sourceUrl: string }>();
+    for (const page of result.pages) {
+        if (page.status !== 'success') continue;
+        for (const link of page.links ?? []) {
+            let absoluteUrl: string;
+            try {
+                absoluteUrl = new URL(link.href, page.url).href;
+            } catch {
+                continue;
+            }
+            if (!seen.has(absoluteUrl)) {
+                seen.set(absoluteUrl, {
+                    url: absoluteUrl,
+                    text: link.text,
+                    isExternal: link.isExternal,
+                    sourceUrl: page.url,
+                });
+            }
+        }
+    }
+    const links = [...seen.values()].sort((a, b) => a.url.localeCompare(b.url));
+    return {
+        urlCount: links.length,
+        links,
+    };
 }
 
 const server = createServer(async (req, res) => {
@@ -196,6 +225,46 @@ const server = createServer(async (req, res) => {
                 extractMarkdown: body.extractMarkdown ?? false,
             });
             json(res, 200, result);
+            return;
+        }
+
+        // POST /v1/map
+        if (url === '/v1/map') {
+            if (!body.url) {
+                json(res, 400, { error: 'Missing required field: url (string)' });
+                return;
+            }
+            const result = await crawl({
+                urls: [body.url],
+                extractText: false,
+                extractLinks: true,
+                extractImages: false,
+                extractMeta: false,
+                extractHeadings: false,
+                extractTables: false,
+                extractEmails: false,
+                extractPhones: false,
+                extractMarkdown: false,
+                maxDepth: body.maxDepth ?? 0,
+                maxPages: body.maxPages ?? 1,
+                includeGlobs: body.includeGlobs,
+                excludeGlobs: body.excludeGlobs,
+                usePlaywright: body.usePlaywright ?? false,
+                adaptiveCrawling: body.adaptiveCrawling ?? false,
+                waitForSelector: body.waitForSelector,
+                waitForMs: body.waitForMs ?? 0,
+                customHeaders: body.customHeaders,
+                proxyUrl: body.proxyUrl,
+                requestRetries: body.requestRetries ?? 3,
+                requestTimeoutSecs: body.requestTimeoutSecs ?? 30,
+                rotateUserAgent: body.rotateUserAgent ?? true,
+            });
+            json(res, 200, {
+                sourceUrl: body.url,
+                crawledPages: result.totalScraped,
+                durationMs: result.durationMs,
+                ...mapDiscoveredLinks(result),
+            });
             return;
         }
 
@@ -365,7 +434,7 @@ const server = createServer(async (req, res) => {
             return;
         }
 
-        json(res, 404, { error: 'Not found. Available endpoints: /v1/crawl, /v1/markdown, /v1/search, /v1/sitemap, /v1/extract, /v1/contracts, /v1/diagnose, /v1/extract-contract, /v1/health' });
+        json(res, 404, { error: 'Not found. Available endpoints: /v1/crawl, /v1/markdown, /v1/search, /v1/map, /v1/sitemap, /v1/extract, /v1/contracts, /v1/diagnose, /v1/extract-contract, /v1/health' });
     } catch (err: any) {
         json(res, 500, { error: err.message || 'Internal server error' });
     }
@@ -374,5 +443,5 @@ const server = createServer(async (req, res) => {
 server.listen(PORT, () => {
     console.log(`TheCrawler API server running on http://localhost:${PORT}`);
     console.log(`Auth: ${API_KEY ? 'API key required (THECRAWLER_API_KEY)' : 'open access (set THECRAWLER_API_KEY to secure)'}`);
-    console.log('Endpoints: POST /v1/crawl, /v1/markdown, /v1/search, /v1/sitemap, /v1/extract, /v1/diagnose, /v1/extract-contract | GET /v1/contracts, /v1/health');
+    console.log('Endpoints: POST /v1/crawl, /v1/markdown, /v1/search, /v1/map, /v1/sitemap, /v1/extract, /v1/diagnose, /v1/extract-contract | GET /v1/contracts, /v1/health');
 });

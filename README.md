@@ -167,6 +167,10 @@ curl -X POST "http://localhost:3000/v1/diagnose" \
   -H "Authorization: Bearer local_test_key" \
   -H "Content-Type: application/json" \
   -d '{"contractName":"product-page","urls":["https://example.com/product"],"reportMarkdown":true}'
+curl -X POST "http://localhost:3000/v1/map" \
+  -H "Authorization: Bearer local_test_key" \
+  -H "Content-Type: application/json" \
+  -d '{"url":"https://example.com","maxPages":1}'
 curl -X POST "http://localhost:3000/v1/extract-contract" \
   -H "Authorization: Bearer local_test_key" \
   -H "Content-Type: application/json" \

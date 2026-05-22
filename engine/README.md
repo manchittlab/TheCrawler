@@ -177,6 +177,7 @@ Endpoints:
 - `POST /v1/crawl`
 - `POST /v1/markdown`
 - `POST /v1/search`
+- `POST /v1/map`
 - `POST /v1/sitemap`
 - `POST /v1/extract`
 - `GET /v1/contracts?includeSchema=true`
@@ -194,6 +195,11 @@ curl -X POST http://localhost:3000/v1/diagnose \
   -H "Authorization: Bearer $THECRAWLER_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"contractName":"product-page","urls":["https://example.com/product"],"reportMarkdown":true}'
+
+curl -X POST http://localhost:3000/v1/map \
+  -H "Authorization: Bearer $THECRAWLER_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"url":"https://example.com","maxPages":1}'
 
 curl -X POST http://localhost:3000/v1/extract-contract \
   -H "Authorization: Bearer $THECRAWLER_API_KEY" \
