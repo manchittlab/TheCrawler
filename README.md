@@ -2,7 +2,7 @@
 
 Scrape web pages, run LLM-powered structured extraction, or diagnose whether URLs are ready for a built-in extraction contract before spending LLM tokens. Open source engine (AGPL-3.0). $0.005 per successfully scraped page on Apify.
 
-Start with a safe test: run one public URL with `dryRun: true` on Apify, or clone the current GitHub source and run the local CLI/MCP build from `engine/`. Need to know whether a real public source is worth automating? Open a public fit check in the [$500 diagnostic challenge](https://github.com/manchittlab/TheCrawler/issues/1). A small proof pack is in [`examples/diagnostic-challenge`](examples/diagnostic-challenge).
+Start with a safe test: run one public URL with `dryRun: true` on Apify, or clone the current GitHub source and run the local CLI/MCP build from `engine/`. Need to know whether a real public source is worth automating? Open a public fit check in the [$500 extraction readiness sprint](https://github.com/manchittlab/TheCrawler/issues/1). A small proof pack is in [`examples/diagnostic-challenge`](examples/diagnostic-challenge).
 
 ## What makes this different
 
@@ -141,6 +141,7 @@ PDF and DOCX URLs are auto-detected and parsed. Returns extracted text + (for PD
 
 - **Crawl mode**: $0.005 per page successfully scraped (failed pages don't charge).
 - **Extract mode / diagnostic mode**: still charged per successfully scraped page. LLM endpoint cost is paid by the endpoint owner, not by this actor.
+- **Extraction readiness sprint**: $500 after fit confirmation for one public workflow, up to 25 public URLs, one target output shape, and a 24-hour ready / mixed / blocked report. If the workflow continues into setup or hosted usage, the $500 is credited toward that next step. If another stack is a better fit, the report says so.
 
 ## Beyond the Apify Store
 

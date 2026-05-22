@@ -1,6 +1,6 @@
-# TheCrawler Diagnostic Challenge Example
+# TheCrawler Extraction Readiness Sprint Example
 
-This folder shows the shape of a paid TheCrawler source-readiness diagnostic.
+This folder shows the shape of a paid TheCrawler extraction readiness sprint.
 
 It is intentionally small and conservative:
 
@@ -32,9 +32,9 @@ The point is not to claim every site works. The point is to show the useful resu
 - `sample-report.md` — the report a buyer can read before committing engineering time.
 - `sample-evidence-redacted.json` — compact machine-readable evidence with no raw page content or contact details.
 
-## Commercial diagnostic scope
+## Commercial sprint scope
 
-The paid $500 diagnostic covers up to 8 public URLs and one target output shape. It returns a report like this, plus compact evidence, within 24 hours after scope confirmation and payment.
+The paid $500 sprint covers up to 25 public URLs and one target output shape. It returns a report like this, plus compact evidence, within 24 hours after scope confirmation and payment. If the workflow continues into setup or hosted usage, the $500 is credited toward that next step. If another stack is a better fit, the report says so.
 
 Out of scope:
 
@@ -43,4 +43,4 @@ Out of scope:
 - anti-bot bypass guarantees,
 - a claim that every URL will extract cleanly.
 
-If the target source is not a fit, the diagnostic says so.
+If the target source is not a fit, the sprint says so.
