@@ -13,13 +13,18 @@
  *   POST /v1/search      — search Google + scrape results
  *   POST /v1/sitemap     — crawl from sitemap.xml
  *   POST /v1/extract     — LLM-powered structured extraction
+ *   GET  /v1/contracts   — list built-in extraction contracts
+ *   POST /v1/diagnose    — diagnose contract readiness without an LLM
+ *   POST /v1/extract-contract — extract with a built-in contract + validation
  *   GET  /v1/health      — health check
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { crawl, parseSitemap } from './engine.js';
 import { extract } from './extract.js';
-import type { CrawlOptions, CrawlResult } from './types.js';
+import { attachContractValidation, getExtractionContract, listExtractionContracts } from './contracts.js';
+import { diagnoseContractReadiness, renderContractDiagnosticReport, summarizeContractDiagnostics } from './diagnostics.js';
+import type { CrawlOptions } from './types.js';
 
 const DEFAULT_LLM_BASEURL = process.env.THECRAWLER_LLM_BASEURL || '';
 const DEFAULT_LLM_MODEL = process.env.THECRAWLER_LLM_MODEL || '';
@@ -65,12 +70,32 @@ const server = createServer(async (req, res) => {
         return;
     }
 
-    const url = req.url?.split('?')[0] || '';
+    const requestUrl = new URL(req.url ?? '/', 'http://localhost');
+    const url = requestUrl.pathname;
 
     try {
         // Health check
         if (url === '/v1/health' && req.method === 'GET') {
-            json(res, 200, { status: 'ok', version: '0.2.0', engine: 'thecrawler' });
+            json(res, 200, { status: 'ok', version: '0.3.3', engine: 'thecrawler' });
+            return;
+        }
+
+        // GET /v1/contracts
+        if (url === '/v1/contracts' && req.method === 'GET') {
+            if (!checkAuth(req, res)) return;
+            const includeSchema = requestUrl.searchParams.get('includeSchema') === 'true';
+            const contracts = listExtractionContracts().map((contractName) => {
+                const contract = getExtractionContract(contractName);
+                return {
+                    name: contract.name,
+                    domain: contract.domain,
+                    version: contract.version,
+                    description: contract.description,
+                    requiredFields: contract.requiredFields,
+                    ...(includeSchema ? { schema: contract.schema } : {}),
+                };
+            });
+            json(res, 200, { contracts });
             return;
         }
 
@@ -194,6 +219,109 @@ const server = createServer(async (req, res) => {
             return;
         }
 
+        // POST /v1/diagnose — no-LLM extraction contract readiness
+        if (url === '/v1/diagnose') {
+            if (!body.urls || !Array.isArray(body.urls) || body.urls.length === 0) {
+                json(res, 400, { error: 'Missing required field: urls (string array)' });
+                return;
+            }
+            const contract = getExtractionContract(body.contractName || 'real-estate-listing');
+            const result = await crawl({
+                urls: body.urls,
+                extractMarkdown: true,
+                extractText: true,
+                extractLinks: true,
+                extractImages: true,
+                extractMeta: true,
+                extractStructuredData: true,
+                maxPages: body.maxPages ?? 10,
+                usePlaywright: body.usePlaywright ?? false,
+                adaptiveCrawling: body.adaptiveCrawling ?? true,
+                waitForSelector: body.waitForSelector,
+                waitForMs: body.waitForMs ?? 0,
+                customHeaders: body.customHeaders,
+                proxyUrl: body.proxyUrl,
+                requestRetries: body.requestRetries ?? 3,
+                requestTimeoutSecs: body.requestTimeoutSecs ?? 30,
+                rotateUserAgent: body.rotateUserAgent ?? true,
+            });
+            const diagnostics = result.pages.map((page) => diagnoseContractReadiness(contract, page));
+            const summary = summarizeContractDiagnostics(diagnostics);
+            const generatedAt = new Date().toISOString();
+            const payload: Record<string, unknown> = {
+                generatedAt,
+                contract: {
+                    name: contract.name,
+                    domain: contract.domain,
+                    version: contract.version,
+                    requiredFields: contract.requiredFields,
+                },
+                summary,
+                diagnostics,
+            };
+            if (body.reportMarkdown) {
+                payload.reportMarkdown = renderContractDiagnosticReport({
+                    generatedAt,
+                    contract,
+                    summary,
+                    diagnostics,
+                });
+            }
+            json(res, 200, payload);
+            return;
+        }
+
+        // POST /v1/extract-contract — contract extraction + required-field validation
+        if (url === '/v1/extract-contract') {
+            if (!body.urls || !Array.isArray(body.urls) || body.urls.length === 0) {
+                json(res, 400, { error: 'Missing required field: urls (string array)' });
+                return;
+            }
+            const baseUrl = body.llmBaseUrl || DEFAULT_LLM_BASEURL;
+            const model = body.llmModel || DEFAULT_LLM_MODEL;
+            if (!baseUrl || !model) {
+                json(res, 400, { error: 'Missing LLM config. Provide llmBaseUrl + llmModel in the body, or set THECRAWLER_LLM_BASEURL + THECRAWLER_LLM_MODEL env vars on the server.' });
+                return;
+            }
+            const contract = getExtractionContract(body.contractName || 'real-estate-listing');
+            const prompt = body.additionalPrompt
+                ? `${contract.prompt}\n\nAdditional user instruction:\n${body.additionalPrompt}`
+                : contract.prompt;
+            const results = await extract({
+                urls: body.urls,
+                jsonSchema: contract.schema,
+                prompt,
+                markdownCharLimit: body.markdownCharLimit ?? 30000,
+                crawlOptions: {
+                    usePlaywright: body.usePlaywright ?? false,
+                    adaptiveCrawling: body.adaptiveCrawling ?? false,
+                    requestRetries: body.requestRetries ?? 3,
+                    requestTimeoutSecs: body.requestTimeoutSecs ?? 30,
+                    rotateUserAgent: body.rotateUserAgent ?? true,
+                    customHeaders: body.customHeaders,
+                    proxyUrl: body.proxyUrl,
+                },
+                llm: {
+                    baseUrl,
+                    model,
+                    apiKey: body.llmApiKey || DEFAULT_LLM_API_KEY || undefined,
+                    temperature: body.temperature ?? 0,
+                    maxTokens: body.maxTokens ?? 4000,
+                    timeoutSecs: body.llmTimeoutSecs ?? 120,
+                },
+            });
+            json(res, 200, {
+                contract: {
+                    name: contract.name,
+                    domain: contract.domain,
+                    version: contract.version,
+                    requiredFields: contract.requiredFields,
+                },
+                results: attachContractValidation(contract, results),
+            });
+            return;
+        }
+
         // POST /v1/extract — LLM-powered structured extraction
         if (url === '/v1/extract') {
             if (!body.urls || !Array.isArray(body.urls) || body.urls.length === 0) {
@@ -237,7 +365,7 @@ const server = createServer(async (req, res) => {
             return;
         }
 
-        json(res, 404, { error: 'Not found. Available endpoints: /v1/crawl, /v1/markdown, /v1/search, /v1/sitemap, /v1/extract, /v1/health' });
+        json(res, 404, { error: 'Not found. Available endpoints: /v1/crawl, /v1/markdown, /v1/search, /v1/sitemap, /v1/extract, /v1/contracts, /v1/diagnose, /v1/extract-contract, /v1/health' });
     } catch (err: any) {
         json(res, 500, { error: err.message || 'Internal server error' });
     }
@@ -246,5 +374,5 @@ const server = createServer(async (req, res) => {
 server.listen(PORT, () => {
     console.log(`TheCrawler API server running on http://localhost:${PORT}`);
     console.log(`Auth: ${API_KEY ? 'API key required (THECRAWLER_API_KEY)' : 'open access (set THECRAWLER_API_KEY to secure)'}`);
-    console.log('Endpoints: POST /v1/crawl, /v1/markdown, /v1/search, /v1/sitemap, /v1/extract | GET /v1/health');
+    console.log('Endpoints: POST /v1/crawl, /v1/markdown, /v1/search, /v1/sitemap, /v1/extract, /v1/diagnose, /v1/extract-contract | GET /v1/contracts, /v1/health');
 });

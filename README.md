@@ -159,6 +159,19 @@ node dist/cli.js extract https://example.com --schema '{...}'
 # MCP server (Cline, Claude Code, Cursor, Windsurf)
 node dist/mcp.js
 
+# REST API server
+THECRAWLER_API_KEY=local_test_key node dist/server.js --port 3000
+curl -H "Authorization: Bearer local_test_key" \
+  "http://localhost:3000/v1/contracts?includeSchema=true"
+curl -X POST "http://localhost:3000/v1/diagnose" \
+  -H "Authorization: Bearer local_test_key" \
+  -H "Content-Type: application/json" \
+  -d '{"contractName":"product-page","urls":["https://example.com/product"],"reportMarkdown":true}'
+curl -X POST "http://localhost:3000/v1/extract-contract" \
+  -H "Authorization: Bearer local_test_key" \
+  -H "Content-Type: application/json" \
+  -d '{"contractName":"product-page","urls":["https://example.com/product"],"llmBaseUrl":"http://localhost:1234/v1/chat/completions","llmModel":"qwen/qwen3.5-9b"}'
+
 # Older npm package; use for plain crawl only until the next publish
 npm install thecrawler
 thecrawler crawl https://example.com --markdown

@@ -2,7 +2,7 @@
     "actorSpecification": 1,
     "name": "the-crawler",
     "title": "TheCrawler — validated web extraction contracts for AI agents",
-    "description": "Crawl pages, diagnose whether a source is ready for contract extraction, and extract typed JSON with validation evidence. Built-in real-estate-listing contract checks required fields, reports blockers before spending LLM tokens, and can write a buyer-readable diagnostic report. Also supports plain crawl output, markdown, heading-aware chunks, JSON-LD, microdata, commerce data, forms, analytics tracker detection, hreflang, redirects, structured errors, retryability, adaptive Cheerio-to-Playwright crawling, PDF, and DOCX. Open source engine (AGPL-3.0).",
+    "description": "Crawl pages, diagnose whether a source is ready for contract extraction, and extract typed JSON with validation evidence. Built-in contracts currently cover real-estate-listing and product-page workflows; diagnostics check required signals, report blockers before spending LLM tokens, and can write a buyer-readable readiness report. Also supports plain crawl output, markdown, heading-aware chunks, JSON-LD, microdata, commerce data, forms, analytics tracker detection, hreflang, redirects, structured errors, retryability, adaptive Cheerio-to-Playwright crawling, PDF, and DOCX. Open source engine (AGPL-3.0).",
     "version": "0.1",
     "buildTag": "latest",
     "environmentVariables": {},

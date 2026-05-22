@@ -1,11 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { createServer } from 'node:http';
 
 import {
     getMcpToolDefinitions,
     handleMcpToolCall,
 } from '../dist/mcp-tools.js';
+
+function listen(server) {
+    return new Promise((resolve) => {
+        server.listen(0, '127.0.0.1', () => {
+            resolve(server.address().port);
+        });
+    });
+}
 
 test('MCP exposes validated extraction contract tools for agent clients', () => {
     const names = getMcpToolDefinitions().map((tool) => tool.name);
@@ -37,6 +46,11 @@ test('MCP contract extraction reports LLM configuration before crawling', async 
 });
 
 test('MCP stdio crawl response is not polluted by crawler log lines', async () => {
+    const fixture = createServer((_req, res) => {
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end('<!doctype html><title>MCP fixture</title><main><h1>MCP fixture</h1><p>Local markdown fixture for stdio transport.</p></main>');
+    });
+    const fixturePort = await listen(fixture);
     const child = spawn(process.execPath, ['dist/mcp.js'], {
         cwd: process.cwd(),
         env: {
@@ -60,7 +74,7 @@ test('MCP stdio crawl response is not polluted by crawler log lines', async () =
         child.stdin.write(JSON.stringify(message) + '\n');
     };
 
-    const deadline = Date.now() + 15000;
+    const deadline = Date.now() + 30000;
     send({
         jsonrpc: '2.0',
         id: 1,
@@ -88,7 +102,7 @@ test('MCP stdio crawl response is not polluted by crawler log lines', async () =
         method: 'tools/call',
         params: {
             name: 'crawl_markdown',
-            arguments: { url: 'https://example.com' },
+            arguments: { url: `http://127.0.0.1:${fixturePort}/fixture` },
         },
     });
 
@@ -98,6 +112,7 @@ test('MCP stdio crawl response is not polluted by crawler log lines', async () =
     }
 
     child.kill();
+    fixture.close();
 
     const parsed = stdoutLines.map((line) => JSON.parse(line));
     assert.ok(parsed.some((message) => message.id === 1));

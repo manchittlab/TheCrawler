@@ -169,10 +169,39 @@ The env vars set defaults for `extract_structured` and `extract_extraction_contr
 ## REST API server
 
 ```bash
-THECRAWLER_API_KEY=secret thecrawler-api --port 3000
+THECRAWLER_API_KEY=local_test_key thecrawler-api --port 3000
 ```
 
-Endpoints: `POST /v1/crawl`, `POST /v1/markdown`, `POST /v1/search`, `POST /v1/sitemap`, `GET /v1/health`. All accept the same options as the library.
+Endpoints:
+
+- `POST /v1/crawl`
+- `POST /v1/markdown`
+- `POST /v1/search`
+- `POST /v1/sitemap`
+- `POST /v1/extract`
+- `GET /v1/contracts?includeSchema=true`
+- `POST /v1/diagnose`
+- `POST /v1/extract-contract`
+- `GET /v1/health`
+
+Contract endpoints mirror the CLI/MCP contract flow for API-first buyers:
+
+```bash
+curl -H "Authorization: Bearer $THECRAWLER_API_KEY" \
+  http://localhost:3000/v1/contracts?includeSchema=true
+
+curl -X POST http://localhost:3000/v1/diagnose \
+  -H "Authorization: Bearer $THECRAWLER_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"contractName":"product-page","urls":["https://example.com/product"],"reportMarkdown":true}'
+
+curl -X POST http://localhost:3000/v1/extract-contract \
+  -H "Authorization: Bearer $THECRAWLER_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"contractName":"product-page","urls":["https://example.com/product"],"llmBaseUrl":"http://localhost:1234/v1/chat/completions","llmModel":"qwen/qwen3.5-9b"}'
+```
+
+`/v1/diagnose` does not call an LLM. `/v1/extract-contract` uses the selected contract schema and returns required-field validation evidence. All extraction claims still depend on the tested URLs and the configured LLM; blocked pages are reported as blockers, not false successes.
 
 ## What it extracts (out of the box, no extra code)
 
