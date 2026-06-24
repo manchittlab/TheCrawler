@@ -4,8 +4,8 @@
  * TheCrawler REST API Server
  *
  * Standalone HTTP API wrapping the crawl engine.
- * Run: node dist/server.js --port 3000
- * Or:  thecrawler-api --port 3000
+ * Run from a current source checkout: node dist/server.js --port 3000
+ * Avoid the global `thecrawler-api` binary until npm/global publish catches up.
  *
  * Endpoints:
  *   POST /v1/crawl      — scrape URLs
@@ -223,8 +223,8 @@ const server = createServer(async (req, res) => {
                 extractHeadings: body.extractHeadings ?? true,
                 extractTables: body.extractTables ?? true,
                 extractStructuredData: body.extractStructuredData ?? true,
-                extractEmails: body.extractEmails ?? true,
-                extractPhones: body.extractPhones ?? true,
+                extractEmails: body.extractEmails ?? false,
+                extractPhones: body.extractPhones ?? false,
                 extractMarkdown: body.extractMarkdown ?? false,
                 stripBoilerplate: body.stripBoilerplate ?? true,
                 chunkSize: body.chunkSize ?? 0,

@@ -64,6 +64,8 @@ function baseCrawlOptions(args: Record<string, unknown>): Omit<CrawlOptions, 'ur
         screenshotFullPage: args.screenshotFullPage as boolean ?? false,
         includeGlobs: args.includeGlobs as string[] | undefined,
         excludeGlobs: args.excludeGlobs as string[] | undefined,
+        extractEmails: args.extractEmails as boolean ?? false,
+        extractPhones: args.extractPhones as boolean ?? false,
         logger: silentLogger,
     };
 }
@@ -73,7 +75,7 @@ export function getMcpToolDefinitions() {
     return [
         {
             name: 'crawl',
-            description: 'Scrape one or more URLs. Returns rich structured data: title, description, text, markdown, links, images, meta, OG/Twitter cards, JSON-LD, microdata, headings, tables, emails, phones, forms, redirect chain, hreflang, pagination links, commerce data (price/rating/sku from JSON-LD), analytics tracker detection (16 trackers). Auto-handles PDF and DOCX URLs. Default Cheerio (fast HTTP+parse); set usePlaywright=true for JS rendering, or adaptiveCrawling=true to auto-detect SPAs and re-crawl them with Playwright. On failure, returns structured error with errorType (dns|timeout|rate-limit|blocked-bot|js-required|http-4xx|http-5xx|parse|network|unknown) and retryable flag.',
+            description: 'Scrape one or more URLs. Returns rich structured data: title, description, text, markdown, links, images, meta, OG/Twitter cards, JSON-LD, microdata, headings, tables, forms, redirect chain, hreflang, pagination links, commerce data (price/rating/sku from JSON-LD), analytics tracker detection (16 trackers), and optional email-like/phone-like public text fields when explicitly enabled. Auto-handles PDF and DOCX URLs. Default Cheerio (fast HTTP+parse); set usePlaywright=true for JS rendering, or adaptiveCrawling=true to auto-detect SPAs and re-crawl them with Playwright. On failure, returns structured error with errorType (dns|timeout|rate-limit|blocked-bot|js-required|http-4xx|http-5xx|parse|network|unknown) and retryable flag.',
             inputSchema: {
                 type: 'object' as const,
                 properties: {
@@ -84,6 +86,8 @@ export function getMcpToolDefinitions() {
                     extractImages: { type: 'boolean', description: 'Extract <img> + lazy-loaded data-src', default: true },
                     extractMeta: { type: 'boolean', description: 'Extract <meta>, OG, Twitter Card', default: true },
                     extractStructuredData: { type: 'boolean', description: 'Extract JSON-LD scripts (parsed)', default: true },
+                    extractEmails: { type: 'boolean', description: 'Extract email-like strings from public page HTML when your workflow is allowed to process contact fields.', default: false },
+                    extractPhones: { type: 'boolean', description: 'Extract phone-like strings from public page HTML when your workflow is allowed to process contact fields.', default: false },
                     cssSelector: { type: 'string', description: 'Extract only content matching this CSS selector (returned as selectedContent)' },
                     chunkSize: { type: 'number', description: 'LLM/RAG chunk size in chars (0 = no chunking). Heading-aware chunking.', default: 0 },
                     maxDepth: { type: 'number', description: 'Follow internal links to this depth (0 = no follow)', default: 0 },
@@ -113,7 +117,7 @@ export function getMcpToolDefinitions() {
                     proxyUrl: { type: 'string', description: 'Proxy URL (http://user:pass@host:port)' },
                     requestRetries: { type: 'number', description: 'Retry transient failures (5xx, network, timeout) this many times before giving up', default: 3 },
                     requestTimeoutSecs: { type: 'number', description: 'Per-request timeout in seconds', default: 30 },
-                    rotateUserAgent: { type: 'boolean', description: 'Rotate User-Agent from real-browser pool per request (anti-bot)', default: true },
+                    rotateUserAgent: { type: 'boolean', description: 'Rotate among standard browser User-Agent strings for compatibility. This does not override access controls.', default: true },
                     cacheEnabled: { type: 'boolean', description: 'Use in-memory LRU cache (TTL 5min) — same URL+flags within TTL returns cached results with fromCache:true', default: false },
                 },
                 required: ['urls'],
@@ -211,7 +215,7 @@ export function getMcpToolDefinitions() {
                     proxyUrl: { type: 'string', description: 'Proxy URL (http://user:pass@host:port)' },
                     requestRetries: { type: 'number', description: 'Retry transient failures this many times before giving up.', default: 3 },
                     requestTimeoutSecs: { type: 'number', description: 'Per-request timeout in seconds.', default: 30 },
-                    rotateUserAgent: { type: 'boolean', description: 'Rotate User-Agent from a real-browser pool per request.', default: true },
+                    rotateUserAgent: { type: 'boolean', description: 'Rotate among standard browser User-Agent strings for compatibility. This does not override access controls.', default: true },
                 },
                 required: ['urls'],
             },

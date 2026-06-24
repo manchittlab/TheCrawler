@@ -35,6 +35,7 @@ test('diagnostic marks successful content with listing signals as ready', () => 
     assert.equal(result.recommendedNextStep.action, 'run-contract-extraction');
     assert.ok(result.score >= 70);
     assert.deepEqual(result.blockers, []);
+    assert.deepEqual(result.missingReadinessSignals, ['structured-data-signal', 'contact-signal']);
     assert.ok(result.signals.some((signal) => signal.name === 'price-signal'));
 });
 
@@ -160,6 +161,9 @@ test('diagnostic summary reports workflow readiness across multiple URLs', () =>
     assert.equal(summary.workflowVerdict, 'mixed');
     assert.equal(summary.recommendedNextStep.action, 'extract-ready-subset');
     assert.deepEqual(summary.blockersByType, { 'rate-limit': 1 });
+    assert.equal(summary.missingReadinessSignals['content-volume'], 1);
+    assert.equal(summary.missingReadinessSignals['title-signal'], 1);
+    assert.equal(summary.missingReadinessSignals['contact-signal'], 2);
 });
 
 test('diagnostic report renders buyer-readable summary without raw signal evidence', () => {

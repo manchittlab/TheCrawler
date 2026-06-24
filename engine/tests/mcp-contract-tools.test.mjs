@@ -1,12 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 
 import {
     getMcpToolDefinitions,
     handleMcpToolCall,
 } from '../dist/mcp-tools.js';
+
+const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
 function listen(server) {
     return new Promise((resolve) => {
@@ -28,9 +31,9 @@ test('MCP contract list returns discoverable contract metadata', async () => {
     const response = await handleMcpToolCall('list_extraction_contracts', {});
     const payload = JSON.parse(response.content[0].text);
 
-    assert.deepEqual(payload.contracts.map((contract) => contract.name), ['product-page', 'real-estate-listing']);
-    assert.equal(payload.contracts[0].domain, 'ecommerce');
-    assert.deepEqual(payload.contracts[0].requiredFields, ['name', 'price', 'sourceUrl']);
+    assert.deepEqual(payload.contracts.map((contract) => contract.name), ['docs-page', 'product-page', 'real-estate-listing']);
+    assert.equal(payload.contracts[0].domain, 'documentation');
+    assert.deepEqual(payload.contracts[0].requiredFields, ['title', 'summary', 'sourceUrl']);
 });
 
 test('MCP contract extraction reports LLM configuration before crawling', async () => {
@@ -115,7 +118,9 @@ test('MCP stdio crawl response is not polluted by crawler log lines', async () =
     fixture.close();
 
     const parsed = stdoutLines.map((line) => JSON.parse(line));
-    assert.ok(parsed.some((message) => message.id === 1));
+    const initializeResponse = parsed.find((message) => message.id === 1);
+    assert.ok(initializeResponse);
+    assert.equal(initializeResponse.result.serverInfo.version, pkg.version);
     assert.ok(parsed.some((message) => message.id === 2));
     assert.ok(stdoutLines.every((line) => line.trim().startsWith('{')));
 });

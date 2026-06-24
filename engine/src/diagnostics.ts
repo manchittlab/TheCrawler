@@ -35,6 +35,7 @@ export interface ContractDiagnosticResult {
     score: number;
     blockers: string[];
     warnings: string[];
+    missingReadinessSignals: string[];
     recommendedNextStep: ContractRecommendedNextStep;
     signals: ContractDiagnosticSignal[];
     crawl: {
@@ -66,6 +67,7 @@ export interface ContractDiagnosticSummary {
     workflowVerdict: ContractWorkflowVerdict;
     recommendedNextStep: ContractRecommendedNextStep;
     blockersByType: Record<string, number>;
+    missingReadinessSignals: Record<string, number>;
 }
 
 function compactText(page: PageData): string {
@@ -84,6 +86,12 @@ function hasPattern(text: string, pattern: RegExp): boolean {
 
 function makeSignal(name: string, present: boolean, weight: number, evidence: string | number | null): ContractDiagnosticSignal {
     return { name, present, weight, evidence };
+}
+
+function missingSignalNamesFromSignals(signals: ContractDiagnosticSignal[]): string[] {
+    return signals
+        .filter((signal) => !signal.present)
+        .map((signal) => signal.name);
 }
 
 function realEstateSignals(page: PageData): ContractDiagnosticSignal[] {
@@ -260,6 +268,7 @@ export function diagnoseContractReadiness(
         score,
         blockers,
         warnings,
+        missingReadinessSignals: missingSignalNamesFromSignals(signals),
         recommendedNextStep: recommendForDiagnostic(verdict, blockers, warnings, page),
         signals,
         crawl: {
@@ -318,6 +327,7 @@ export function summarizeContractDiagnostics(results: ContractDiagnosticResult[]
         averageScore,
         workflowVerdict,
         blockersByType,
+        missingReadinessSignals: countMissingSignals(results),
     };
     return {
         ...summary,
@@ -330,9 +340,7 @@ function mdCell(value: string | number | boolean | null | undefined): string {
 }
 
 function missingSignalNames(diagnostic: ContractDiagnosticResult): string[] {
-    return diagnostic.signals
-        .filter((signal) => !signal.present)
-        .map((signal) => signal.name);
+    return diagnostic.missingReadinessSignals ?? missingSignalNamesFromSignals(diagnostic.signals);
 }
 
 function countMissingSignals(diagnostics: ContractDiagnosticResult[]): Record<string, number> {
@@ -375,7 +383,7 @@ export function renderContractDiagnosticReport(input: {
     lines.push('');
     lines.push('## Readiness Gaps');
     lines.push('');
-    const missingSignalCounts = countMissingSignals(diagnostics);
+    const missingSignalCounts = summary.missingReadinessSignals ?? countMissingSignals(diagnostics);
     const missingSignalEntries = Object.entries(missingSignalCounts)
         .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
     if (missingSignalEntries.length === 0) {

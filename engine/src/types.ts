@@ -16,7 +16,7 @@ export type CrawlErrorType =
     | 'dns'             // hostname does not resolve
     | 'timeout'         // request exceeded timeout
     | 'rate-limit'      // 429 or known rate-limit response
-    | 'blocked-bot'     // 403 / Cloudflare / Akamai / WAF block
+    | 'blocked-bot'     // 403 / known access-control or challenge-page response
     | 'js-required'     // page is mostly empty without JS render
     | 'http-4xx'        // any other 4xx
     | 'http-5xx'        // any 5xx
@@ -78,10 +78,25 @@ export interface CrawlOptions {
      */
     requestTimeoutSecs?: number;
     /**
-     * Rotate User-Agent strings from a real-browser pool per request.
-     * Reduces detection by basic anti-bot WAFs. Default: true.
+     * Rotate among standard browser User-Agent strings per request.
+     * Uses varied standard browser User-Agent strings for compatibility with
+     * sites that treat missing or unusual user agents differently. Default: true.
      */
     rotateUserAgent?: boolean;
+    /**
+     * Extract brand identity: ranked color `palette`, `themeColor`, and `logo`
+     * candidates on each PageData. Reads <meta theme-color>, CSS custom
+     * properties, inline/<style>/linked-stylesheet colors, and — in Playwright
+     * mode — rendered getComputedStyle colors. Default: false (opt-in).
+     */
+    extractBrand?: boolean;
+    /**
+     * When extractBrand is on and running in Cheerio mode, fetch a bounded set
+     * of linked stylesheets (<link rel=stylesheet>) to mine brand colors.
+     * Bounded for latency + SSRF safety. Default: true. Ignored in Playwright
+     * mode, where computed colors are the primary signal.
+     */
+    brandFetchStylesheets?: boolean;
     /**
      * Optional in-memory cache config. See CacheOptions.
      */
@@ -148,6 +163,33 @@ export interface PageData {
     errorRetryable: boolean;
     /** True if this PageData came from cache rather than a fresh fetch. */
     fromCache: boolean;
+    /**
+     * Which engine actually rendered this page. 'playwright' means Chromium
+     * executed the page's JS (so computed colors / SPA content are reliable);
+     * 'cheerio' is a plain HTTP fetch + static HTML parse. Reflects the real
+     * path taken, including an adaptive Cheerio→Playwright upgrade.
+     */
+    engine: 'cheerio' | 'playwright';
+    /** Convenience mirror of `engine === 'playwright'`. */
+    usedPlaywright: boolean;
+    /**
+     * `<meta name="theme-color">` normalized to a 6-digit lowercase hex, or null.
+     * Only populated when extractBrand is on. Often the single highest-signal
+     * brand color.
+     */
+    themeColor: string | null;
+    /**
+     * Ranked brand color palette (top ~5), highest signal first. Only populated
+     * when extractBrand is on. `hex` is the minimum guarantee; role/source/weight
+     * are best-effort. Ordering is deterministic for a given page.
+     */
+    palette: { hex: string; role: string | null; source: string; weight: number }[];
+    /**
+     * Ranked best-guess logo candidates (top ~4), highest confidence first. Only
+     * populated when extractBrand is on. Suggestions only — never auto-applied.
+     * Absolute URLs; SVG/transparent-PNG preferred.
+     */
+    logo: { url: string; source: string; type: string | null; confidence: number }[];
 }
 
 export interface CrawlResult {

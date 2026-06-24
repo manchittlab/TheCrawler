@@ -10,7 +10,7 @@
  * the LLM can branch on failures instead of regex-matching strings.
  *
  * Setup in Claude Code:
- *   claude mcp add thecrawler node /path/to/the-crawler-standalone/dist/mcp.js
+ *   claude mcp add thecrawler node /path/to/TheCrawler/engine/dist/mcp.js
  *
  * Setup in settings.json:
  *   "mcpServers": {
@@ -25,11 +25,21 @@ import { crawl, parseSitemap } from './engine.js';
 import { extract } from './extract.js';
 import { getMcpToolDefinitions, handleMcpToolCall } from './mcp-tools.js';
 import type { CrawlOptions, PageData } from './types.js';
+import { readFileSync } from 'node:fs';
 
 process.env.CRAWLEE_LOG_LEVEL = process.env.CRAWLEE_LOG_LEVEL || 'OFF';
 
+function readPackageVersion(): string {
+    try {
+        const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+        return pkg.version ?? '0.0.0';
+    } catch {
+        return '0.0.0';
+    }
+}
+
 const server = new Server(
-    { name: 'thecrawler', version: '0.3.1' },
+    { name: 'thecrawler', version: readPackageVersion() },
     { capabilities: { tools: {} } },
 );
 
@@ -74,7 +84,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         ].includes(tool.name)),
         {
             name: 'crawl',
-            description: 'Scrape one or more URLs. Returns rich structured data: title, description, text, markdown, links, images, meta, OG/Twitter cards, JSON-LD, microdata, headings, tables, emails, phones, forms, redirect chain, hreflang, pagination links, commerce data (price/rating/sku from JSON-LD), analytics tracker detection (16 trackers). Auto-handles PDF and DOCX URLs. Default Cheerio (fast HTTP+parse); set usePlaywright=true for JS rendering, or adaptiveCrawling=true to auto-detect SPAs and re-crawl them with Playwright. On failure, returns structured error with errorType (dns|timeout|rate-limit|blocked-bot|js-required|http-4xx|http-5xx|parse|network|unknown) and retryable flag.',
+            description: 'Scrape one or more URLs. Returns rich structured data: title, description, text, markdown, links, images, meta, OG/Twitter cards, JSON-LD, microdata, headings, tables, forms, redirect chain, hreflang, pagination links, commerce data (price/rating/sku from JSON-LD), analytics tracker detection (16 trackers), and optional email-like/phone-like public text fields when explicitly enabled. Auto-handles PDF and DOCX URLs. Default Cheerio (fast HTTP+parse); set usePlaywright=true for JS rendering, or adaptiveCrawling=true to auto-detect SPAs and re-crawl them with Playwright. On failure, returns structured error with errorType (dns|timeout|rate-limit|blocked-bot|js-required|http-4xx|http-5xx|parse|network|unknown) and retryable flag.',
             inputSchema: {
                 type: 'object' as const,
                 properties: {
@@ -85,6 +95,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
                     extractImages: { type: 'boolean', description: 'Extract <img> + lazy-loaded data-src', default: true },
                     extractMeta: { type: 'boolean', description: 'Extract <meta>, OG, Twitter Card', default: true },
                     extractStructuredData: { type: 'boolean', description: 'Extract JSON-LD scripts (parsed)', default: true },
+                    extractEmails: { type: 'boolean', description: 'Extract email-like strings from public page HTML when your workflow is allowed to process contact fields.', default: false },
+                    extractPhones: { type: 'boolean', description: 'Extract phone-like strings from public page HTML when your workflow is allowed to process contact fields.', default: false },
                     cssSelector: { type: 'string', description: 'Extract only content matching this CSS selector (returned as selectedContent)' },
                     chunkSize: { type: 'number', description: 'LLM/RAG chunk size in chars (0 = no chunking). Heading-aware chunking.', default: 0 },
                     maxDepth: { type: 'number', description: 'Follow internal links to this depth (0 = no follow)', default: 0 },
@@ -94,7 +106,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
                     proxyUrl: { type: 'string', description: 'Proxy URL (http://user:pass@host:port)' },
                     requestRetries: { type: 'number', description: 'Retry transient failures (5xx, network, timeout) this many times before giving up', default: 3 },
                     requestTimeoutSecs: { type: 'number', description: 'Per-request timeout in seconds', default: 30 },
-                    rotateUserAgent: { type: 'boolean', description: 'Rotate User-Agent from real-browser pool per request (anti-bot)', default: true },
+                    rotateUserAgent: { type: 'boolean', description: 'Rotate among standard browser User-Agent strings for compatibility. This does not override access controls.', default: true },
                     cacheEnabled: { type: 'boolean', description: 'Use in-memory LRU cache (TTL 5min) — same URL+flags within TTL returns cached result with fromCache:true', default: false },
                 },
                 required: ['urls'],
@@ -179,6 +191,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     extractImages: args?.extractImages as boolean ?? true,
                     extractMeta: args?.extractMeta as boolean ?? true,
                     extractStructuredData: args?.extractStructuredData as boolean ?? true,
+                    extractEmails: args?.extractEmails as boolean ?? false,
+                    extractPhones: args?.extractPhones as boolean ?? false,
                     cssSelector: args?.cssSelector as string | undefined,
                     chunkSize: args?.chunkSize as number ?? 0,
                     maxDepth: args?.maxDepth as number ?? 0,

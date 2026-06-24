@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { Command } from 'commander';
+import { Command, InvalidArgumentError } from 'commander';
 import { crawl, crawlStream, parseSitemap } from './engine.js';
 import { extract } from './extract.js';
 import { attachContractValidation, getExtractionContract, listExtractionContracts } from './contracts.js';
@@ -19,6 +19,14 @@ function readPackageVersion(): string {
     }
 }
 
+function parseIntegerOption(value: string): number {
+    const parsed = Number.parseInt(value, 10);
+    if (Number.isNaN(parsed)) {
+        throw new InvalidArgumentError(`Expected an integer, received "${value}".`);
+    }
+    return parsed;
+}
+
 program
     .name('thecrawler')
     .description('Web scraper, PDF/DOCX parser, LLM-ready markdown. Structured errors, UA rotation, retry, optional in-memory cache.')
@@ -31,11 +39,11 @@ program
     .argument('<urls...>', 'URLs to scrape (space-separated)')
     .option('-o, --output <file>', 'Write JSON output to file (default: stdout)')
     .option('--markdown', 'Extract markdown (Turndown + GFM)', false)
-    .option('--chunks <size>', 'Enable LLM/RAG chunking with this char size', parseInt)
+    .option('--chunks <size>', 'Enable LLM/RAG chunking with this char size', parseIntegerOption)
     .option('--playwright', 'Use Playwright for JS rendering', false)
     .option('--adaptive', 'Auto-detect SPAs, Playwright fallback', false)
-    .option('--depth <n>', 'Follow links to this depth (0 = no follow)', parseInt, 0)
-    .option('--max-pages <n>', 'Max pages to scrape', parseInt, 100)
+    .option('--depth <n>', 'Follow links to this depth (0 = no follow)', parseIntegerOption, 0)
+    .option('--max-pages <n>', 'Max pages to scrape', parseIntegerOption, 100)
     .option('--proxy <url>', 'Proxy URL (http://user:pass@host:port)')
     .option('--headers <json>', 'Custom headers as JSON string')
     .option('--css <selector>', 'Extract only content matching CSS selector')
@@ -44,8 +52,8 @@ program
     .option('--no-images', 'Skip image extraction')
     .option('--no-meta', 'Skip meta tag extraction')
     .option('--screenshot', 'Take full-page screenshot (Playwright only)', false)
-    .option('--retries <n>', 'Retry transient failures (5xx, network, timeout) this many times', parseInt, 3)
-    .option('--timeout <secs>', 'Per-request timeout in seconds', parseInt, 30)
+    .option('--retries <n>', 'Retry transient failures (5xx, network, timeout) this many times', parseIntegerOption, 3)
+    .option('--timeout <secs>', 'Per-request timeout in seconds', parseIntegerOption, 30)
     .option('--no-rotate-ua', 'Disable User-Agent rotation (uses default UA)')
     .option('--cache', 'Enable in-memory LRU cache (TTL 5min)', false)
     .option('--json-lines', 'Output one JSON object per line (streaming)', false)
@@ -99,7 +107,7 @@ program
     .command('search')
     .description('Search Google and scrape the results')
     .argument('<query>', 'Search query')
-    .option('-n, --limit <n>', 'Number of results to scrape', parseInt, 10)
+    .option('-n, --limit <n>', 'Number of results to scrape', parseIntegerOption, 10)
     .option('-o, --output <file>', 'Write JSON output to file')
     .option('--markdown', 'Extract markdown', false)
     .option('--serpapi <key>', 'SerpAPI key for reliable results')
@@ -127,7 +135,7 @@ program
     .command('sitemap')
     .description('Crawl URLs from a sitemap.xml')
     .argument('<url>', 'Sitemap URL')
-    .option('-n, --max-pages <n>', 'Max pages to scrape', parseInt, 100)
+    .option('-n, --max-pages <n>', 'Max pages to scrape', parseIntegerOption, 100)
     .option('-o, --output <file>', 'Write JSON output to file')
     .option('--markdown', 'Extract markdown', false)
     .option('--list-only', 'Only list URLs without scraping', false)
@@ -161,7 +169,7 @@ program
     .command('md')
     .description('Extract markdown from a URL (shortcut for crawl --markdown)')
     .argument('<url>', 'URL to extract markdown from')
-    .option('--chunks <size>', 'Enable chunking', parseInt)
+    .option('--chunks <size>', 'Enable chunking', parseIntegerOption)
     .option('--playwright', 'Use Playwright', false)
     .action(async (url: string, opts) => {
         const result = await crawl({
@@ -195,8 +203,8 @@ program
     .option('--llm-model <name>', 'Model name (default: $THECRAWLER_LLM_MODEL)')
     .option('--llm-api-key <key>', 'Optional bearer token (default: $THECRAWLER_LLM_API_KEY)')
     .option('--temperature <n>', 'LLM temperature (0 = deterministic)', parseFloat, 0)
-    .option('--max-tokens <n>', 'Max LLM response tokens', parseInt, 4000)
-    .option('--markdown-char-limit <n>', 'Max chars of page markdown sent to the LLM', parseInt, 30000)
+    .option('--max-tokens <n>', 'Max LLM response tokens', parseIntegerOption, 4000)
+    .option('--markdown-char-limit <n>', 'Max chars of page markdown sent to the LLM', parseIntegerOption, 30000)
     .option('--playwright', 'Use Playwright for JS rendering during crawl', false)
     .option('-o, --output <file>', 'Write JSON output to file (default: stdout)')
     .option('--evidence-output <file>', 'Write contract evidence JSON with validation results')
@@ -288,8 +296,8 @@ program
     .option('--contract <name>', `Built-in extraction contract (${listExtractionContracts().join(', ')})`, 'real-estate-listing')
     .option('--playwright', 'Use Playwright for JS rendering during crawl', false)
     .option('--adaptive', 'Auto-detect SPAs, Playwright fallback', true)
-    .option('--timeout <secs>', 'Per-request timeout in seconds', parseInt, 30)
-    .option('--retries <n>', 'Retry transient failures this many times', parseInt, 1)
+    .option('--timeout <secs>', 'Per-request timeout in seconds', parseIntegerOption, 30)
+    .option('--retries <n>', 'Retry transient failures this many times', parseIntegerOption, 1)
     .option('-o, --output <file>', 'Write diagnostic JSON to file (default: stdout)')
     .option('--report <file>', 'Write buyer-readable Markdown diagnostic report')
     .action(async (urls: string[], opts) => {

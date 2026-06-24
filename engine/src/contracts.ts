@@ -174,7 +174,57 @@ const PRODUCT_PAGE_CONTRACT: ExtractionContract = {
     ].join(' '),
 };
 
+const DOCS_PAGE_CONTRACT: ExtractionContract = {
+    name: 'docs-page',
+    domain: 'documentation',
+    version: '2026-05-24',
+    description: 'Extracts public documentation page facts for RAG and agent knowledge-base workflows.',
+    requiredFields: ['title', 'summary', 'sourceUrl'],
+    schema: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['title', 'summary', 'sourceUrl'],
+        properties: {
+            title: { type: ['string', 'null'], description: 'Documentation page title or primary heading.' },
+            summary: { type: ['string', 'null'], description: 'Concise summary of what the public documentation page explains.' },
+            sourceUrl: { type: ['string', 'null'], description: 'Canonical URL for the documentation page that was extracted.' },
+            headings: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'Important public section headings visible on the page.',
+            },
+            apiEndpoints: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'Public API endpoints, methods, or route patterns documented on the page.',
+            },
+            codeExamples: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'Short public code snippets or command examples visible in the documentation.',
+            },
+            productArea: { type: ['string', 'null'], description: 'Documented product, API, SDK, or feature area.' },
+            confidence: { type: ['number', 'null'], description: '0 to 1 confidence score based only on visible documentation evidence.' },
+            evidenceNotes: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'Short notes citing what was visible, missing, blocked, or ambiguous.',
+            },
+        },
+    },
+    prompt: [
+        'Extract one public documentation page record for a RAG or agent knowledge-base workflow.',
+        'Use only documentation facts visible in the provided content.',
+        'Do not extract contributor identities, comments, personal data, contact fields, or account-specific data.',
+        'Keep codeExamples short and omit secrets, tokens, or credentials if any example resembles one.',
+        'Do not invent missing values. Use null or empty arrays when a field is not visible.',
+        'Set sourceUrl to the input URL or canonical documentation URL visible in the content.',
+        'Use evidenceNotes to explain missing required fields, blocked content, or ambiguity.',
+    ].join(' '),
+};
+
 const CONTRACTS = new Map<string, ExtractionContract>([
+    [DOCS_PAGE_CONTRACT.name, DOCS_PAGE_CONTRACT],
     [REAL_ESTATE_LISTING_CONTRACT.name, REAL_ESTATE_LISTING_CONTRACT],
     [PRODUCT_PAGE_CONTRACT.name, PRODUCT_PAGE_CONTRACT],
 ]);

@@ -205,6 +205,8 @@ try {
 
         const opts: CrawlOptions = {
             ...input,
+            extractEmails: input.extractEmails ?? false,
+            extractPhones: input.extractPhones ?? false,
             cache: input.cacheEnabled ? { enabled: true } : input.cache,
             onStoreValue: async (key, buffer, contentType) => {
                 await Actor.setValue(key, buffer, { contentType });

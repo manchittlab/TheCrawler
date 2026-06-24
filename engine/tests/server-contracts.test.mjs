@@ -77,6 +77,7 @@ test('REST API exposes contract discovery and diagnostic-first contract flow', a
             summaries, comparison notes, package contents, product images, and other catalog content
             suitable for product-page extraction workflows. The page repeats enough buyer-facing
             product information for the readiness diagnostic to avoid thin-content behavior.</p>
+            <p>Support: contact@example.com or 55 010 100.</p>
             <a href="/products/headphones/reviews">Reviews</a>
             <a href="/support">Support</a>
             <a href="https://example.org/external">External reference</a>
@@ -111,7 +112,7 @@ test('REST API exposes contract discovery and diagnostic-first contract flow', a
         });
         assert.equal(contractsResponse.status, 200);
         const contracts = await contractsResponse.json();
-        assert.deepEqual(contracts.contracts.map((contract) => contract.name), ['product-page', 'real-estate-listing']);
+        assert.deepEqual(contracts.contracts.map((contract) => contract.name), ['docs-page', 'product-page', 'real-estate-listing']);
         assert.equal(contracts.contracts[0].schema.type, 'object');
 
         const { response: missingLlmResponse, payload: missingLlmPayload } = await postJson(
@@ -154,6 +155,26 @@ test('REST API exposes contract discovery and diagnostic-first contract flow', a
         assert.equal(scrapePayload.data.commerceData[0].price, '299');
         assert.equal(scrapePayload.data.text, undefined);
 
+        const { response: defaultCrawlResponse, payload: defaultCrawlPayload } = await postJson(
+            apiPort,
+            '/v1/crawl',
+            apiKey,
+            { urls: [`http://127.0.0.1:${fixturePort}/product`] },
+        );
+        assert.equal(defaultCrawlResponse.status, 200);
+        assert.deepEqual(defaultCrawlPayload.pages[0].emails, []);
+        assert.deepEqual(defaultCrawlPayload.pages[0].phones, []);
+
+        const { response: contactCrawlResponse, payload: contactCrawlPayload } = await postJson(
+            apiPort,
+            '/v1/crawl',
+            apiKey,
+            { urls: [`http://127.0.0.1:${fixturePort}/product`], extractEmails: true, extractPhones: true },
+        );
+        assert.equal(contactCrawlResponse.status, 200);
+        assert.ok(contactCrawlPayload.pages[0].emails.includes('contact@example.com'));
+        assert.ok(contactCrawlPayload.pages[0].phones.some((phone) => phone.includes('55 010 100')));
+
         const { response: diagnoseResponse, payload: diagnostic } = await postJson(
             apiPort,
             '/v1/diagnose',
@@ -168,7 +189,9 @@ test('REST API exposes contract discovery and diagnostic-first contract flow', a
         assert.equal(diagnostic.contract.name, 'product-page');
         assert.equal(diagnostic.summary.totalUrls, 1);
         assert.equal(diagnostic.summary.workflowVerdict, 'ready');
+        assert.deepEqual(diagnostic.summary.missingReadinessSignals, {});
         assert.equal(diagnostic.diagnostics[0].readyForExtraction, true);
+        assert.deepEqual(diagnostic.diagnostics[0].missingReadinessSignals, []);
         assert.match(diagnostic.reportMarkdown, /TheCrawler Extraction Readiness Report/);
         assert.doesNotMatch(diagnostic.reportMarkdown, /HP-299/);
     } finally {

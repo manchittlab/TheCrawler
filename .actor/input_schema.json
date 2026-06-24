@@ -61,18 +61,25 @@
             "default": true,
             "editor": "checkbox"
         },
-        "extractEmails": {
-            "title": "Extract Emails",
+        "extractBrand": {
+            "title": "Extract Brand Identity (palette, theme color, logo)",
             "type": "boolean",
-            "description": "Find email addresses in the page HTML.",
-            "default": true,
+            "description": "Extract brand colors (ranked palette + themeColor) and logo candidates. Reads <meta theme-color>, CSS variables, inline/<style>/linked-stylesheet colors, and — with JS Rendering (Playwright) enabled — the rendered computed colors of header/nav/buttons (most accurate, works on SPAs). Adds palette[], themeColor, and logo[] to each result.",
+            "default": false,
+            "editor": "checkbox"
+        },
+        "extractEmails": {
+            "title": "Extract Email-like Text",
+            "type": "boolean",
+            "description": "Find email-like strings in public page HTML. Leave off unless your workflow is allowed to process contact fields.",
+            "default": false,
             "editor": "checkbox"
         },
         "extractPhones": {
-            "title": "Extract Phone Numbers",
+            "title": "Extract Phone-like Text",
             "type": "boolean",
-            "description": "Find phone numbers in the page HTML.",
-            "default": true,
+            "description": "Find phone-like strings in public page HTML. Leave off unless your workflow is allowed to process contact fields.",
+            "default": false,
             "editor": "checkbox"
         },
         "cssSelector": {
@@ -223,7 +230,7 @@
         "rotateUserAgent": {
             "title": "Rotate User-Agent",
             "type": "boolean",
-            "description": "Rotate User-Agent from a real-browser pool (Chrome / Firefox / Safari) per request. Reduces basic anti-bot WAF detection.",
+            "description": "Rotate among standard browser User-Agent strings for compatibility with sites that treat missing or unusual user agents differently. This does not override access controls.",
             "default": true,
             "editor": "checkbox"
         },
@@ -245,11 +252,11 @@
         "extractContract": {
             "title": "Extraction Contract",
             "type": "string",
-            "description": "Built-in contract name for diagnostic or extract mode. Current options: real-estate-listing and product-page. In extractMode this supplies the schema and validation rules; in diagnoseMode it supplies the readiness signals.",
+            "description": "Built-in contract name for diagnostic or extract mode. Current options: real-estate-listing, product-page, and docs-page. In extractMode this supplies the schema and validation rules; in diagnoseMode it supplies the readiness signals.",
             "default": "real-estate-listing",
             "editor": "select",
-            "enum": ["real-estate-listing", "product-page"],
-            "enumTitles": ["Real Estate Listing", "Product Page"]
+            "enum": ["real-estate-listing", "product-page", "docs-page"],
+            "enumTitles": ["Real Estate Listing", "Product Page", "Docs Page"]
         },
         "diagnosticReport": {
             "title": "Save Diagnostic Report",

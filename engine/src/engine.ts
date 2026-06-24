@@ -6,7 +6,7 @@
  *
  * v0.2.0 changes (S11 2026-04-28):
  * - Structured error taxonomy (PageData.errorType, errorRetryable)
- * - User-Agent rotation from real-browser pool (rotateUserAgent option)
+ * - Standard browser User-Agent rotation (rotateUserAgent option)
  * - Configurable retries + timeout (requestRetries, requestTimeoutSecs)
  * - Optional in-memory LRU cache (cache.enabled)
  */
@@ -15,12 +15,17 @@ import { CheerioCrawler, PlaywrightCrawler, ProxyConfiguration, RequestQueue, ty
 import * as cheerioLib from 'cheerio';
 import { createRequire } from 'node:module';
 import { createHash } from 'node:crypto';
+import { lookup as dnsLookup } from 'node:dns/promises';
 import TurndownService from 'turndown';
 // @ts-ignore — no types available
 import { gfm } from 'turndown-plugin-gfm';
 
 import type { CrawlOptions, PageData, CrawlResult, BrowserAction, CrawlErrorType } from './types.js';
 import { CrawlCache, getDefaultCache } from './cache.js';
+import {
+    buildPalette, rankLogos, collectCssColors, normalizeColor, sanitizeInlineSvg,
+    isBlockedBrandHost, sameSite, type ColorHit, type LogoEntry,
+} from './brand.js';
 
 // Re-export types for consumers
 export type { CrawlOptions, PageData, CrawlResult, BrowserAction, CrawlErrorType } from './types.js';
@@ -31,7 +36,7 @@ const defaultLogger = {
     error: (msg: string, data?: any) => console.error(`[TheCrawler] ${msg}`, data ? JSON.stringify(data) : ''),
 };
 
-// --- User-Agent pool (real-browser strings, rotated per request) ---
+// --- User-Agent pool (standard browser strings, rotated per request) ---
 const USER_AGENT_POOL = [
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
     'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
@@ -211,6 +216,7 @@ function emptyPage(url: string, overrides: Partial<PageData> = {}): PageData {
         statusCode: 0, contentType: null, responseTimeMs: null, pageSizeBytes: null,
         responseHeaders: {}, scrapedAt: new Date().toISOString(), status: 'error', error: null,
         errorType: null, errorRetryable: false, fromCache: false,
+        engine: 'cheerio', usedPlaywright: false, themeColor: null, palette: [], logo: [],
         ...overrides,
     };
 }
@@ -224,6 +230,158 @@ function errorPage(url: string, message: string, statusCode?: number): PageData 
         errorRetryable: retryable,
         statusCode: statusCode ?? 0,
     });
+}
+
+// --- Brand identity helpers ---
+
+const LOGO_HINT_RE = /logo|brand/i;
+
+/** Recursively collect logo URLs from JSON-LD (Organization/WebSite/publisher logo, @graph). */
+function findJsonLdLogos(nodes: unknown[], depth = 0): string[] {
+    const out: string[] = [];
+    const visit = (v: any, d: number) => {
+        if (!v || typeof v !== 'object' || d > 6) return;
+        if (Array.isArray(v)) { for (const x of v) visit(x, d + 1); return; }
+        if (v.logo) {
+            if (typeof v.logo === 'string') out.push(v.logo);
+            else if (Array.isArray(v.logo) && typeof v.logo[0]?.url === 'string') out.push(v.logo[0].url);
+            else if (typeof v.logo === 'object' && typeof v.logo.url === 'string') out.push(v.logo.url);
+        }
+        for (const k of Object.keys(v)) {
+            if (k === 'logo') continue;
+            const child = v[k];
+            if (child && typeof child === 'object') visit(child, d + 1);
+        }
+    };
+    for (const n of nodes) visit(n, depth);
+    return out;
+}
+
+function guessImageType(url: string): string | null {
+    if (url.startsWith('data:image/svg')) return 'svg';
+    const m = url.split('?')[0].toLowerCase().match(/\.(svg|png|jpe?g|webp|gif|ico|avif)$/);
+    if (!m) return null;
+    return m[1] === 'jpeg' ? 'jpg' : m[1];
+}
+
+/** Gather ranked logo candidates from the DOM + JSON-LD. */
+function extractLogoCandidates($: any, pageUrl: string, structuredData: unknown[]): LogoEntry[] {
+    const cands: LogoEntry[] = [];
+    let origin = '';
+    try { origin = new URL(pageUrl).origin; } catch {}
+    const abs = (u: string | undefined | null): string | null => {
+        if (!u) return null;
+        try { return new URL(u, pageUrl).href; } catch { return null; }
+    };
+
+    for (const raw of findJsonLdLogos(structuredData)) {
+        const u = abs(raw);
+        if (u) cands.push({ url: u, source: 'json-ld', type: guessImageType(u), confidence: 0.9 });
+    }
+
+    $('header img, nav img, [role="banner"] img, .logo img, .brand img, a[class*="logo"] img, a[class*="brand"] img').each((_i: any, el: any) => {
+        const hint = `${$(el).attr('class') || ''} ${$(el).attr('id') || ''} ${$(el).attr('alt') || ''} ${$(el).attr('src') || ''}`;
+        if (!LOGO_HINT_RE.test(hint)) return;
+        const u = abs($(el).attr('src') || $(el).attr('data-src'));
+        if (u) cands.push({ url: u, source: 'header-img', type: guessImageType(u), confidence: 0.8 });
+    });
+    $('img[class*="logo" i], img[id*="logo" i], img[alt*="logo" i]').each((_i: any, el: any) => {
+        const u = abs($(el).attr('src') || $(el).attr('data-src'));
+        if (u) cands.push({ url: u, source: 'logo-img', type: guessImageType(u), confidence: 0.7 });
+    });
+
+    $('header svg, nav svg, [role="banner"] svg, .logo svg, [class*="logo"] svg, [class*="brand"] svg').each((_i: any, el: any) => {
+        if (cands.some((c) => c.source === 'header-svg')) return;
+        const safe = sanitizeInlineSvg($.html($(el)));
+        if (safe) cands.push({ url: `data:image/svg+xml;utf8,${encodeURIComponent(safe)}`, source: 'header-svg', type: 'svg', confidence: 0.78 });
+    });
+
+    $('link[rel~="icon"], link[rel="apple-touch-icon"], link[rel="apple-touch-icon-precomposed"], link[rel="mask-icon"]').each((_i: any, el: any) => {
+        const rel = ($(el).attr('rel') || '').toLowerCase();
+        const u = abs($(el).attr('href'));
+        if (!u) return;
+        const conf = rel.includes('apple-touch') ? 0.7 : rel.includes('mask') ? 0.6 : 0.65;
+        cands.push({ url: u, source: rel || 'icon', type: guessImageType(u), confidence: conf });
+    });
+    if (origin) cands.push({ url: `${origin}/favicon.ico`, source: 'favicon-default', type: 'ico', confidence: 0.4 });
+
+    const og = $('meta[property="og:image"]').attr('content') || $('meta[name="og:image"]').attr('content');
+    const ogu = abs(og);
+    if (ogu) cands.push({ url: ogu, source: 'og:image', type: guessImageType(ogu), confidence: 0.3 });
+
+    return rankLogos(cands);
+}
+
+/** Sample rendered brand colors from a live Playwright page (computed styles). */
+async function sampleComputedColors(page: any): Promise<ColorHit[]> {
+    try {
+        const raw: { v: string; role: string; w: number }[] = await page.evaluate(() => {
+            const out: { v: string; role: string; w: number }[] = [];
+            const push = (v: string | null, role: string, w: number) => { if (v) out.push({ v, role, w }); };
+            const grabBg = (sel: string, role: string, w: number) => {
+                const el = document.querySelector(sel) as HTMLElement | null;
+                if (el) push(getComputedStyle(el).backgroundColor, role + '-bg', w);
+            };
+            grabBg('header', 'header', 0.45);
+            grabBg('nav', 'nav', 0.4);
+            const btn = document.querySelector('button, .btn, [class*="button"], a[class*="btn"]') as HTMLElement | null;
+            if (btn) { const cs = getComputedStyle(btn); push(cs.backgroundColor, 'button-bg', 0.45); push(cs.color, 'button-fg', 0.3); }
+            const link = document.querySelector('a[href]') as HTMLElement | null;
+            if (link) push(getComputedStyle(link).color, 'link', 0.35);
+            const logo = document.querySelector('[class*="logo"], [id*="logo"]') as HTMLElement | null;
+            if (logo) push(getComputedStyle(logo).backgroundColor, 'logo-bg', 0.3);
+            if (document.body) push(getComputedStyle(document.body).backgroundColor, 'body-bg', 0.2);
+            return out;
+        });
+        return raw
+            .filter((r) => r.v && r.v !== 'transparent' && !/rgba?\(\s*0,\s*0,\s*0,\s*0\s*\)/.test(r.v))
+            .map((r) => ({ value: r.v, source: 'computed:' + r.role, weight: r.w }));
+    } catch {
+        return [];
+    }
+}
+
+/** Fetch a bounded, SSRF-safe set of same-domain linked stylesheets; return concatenated CSS. */
+async function fetchBrandStylesheets($: any, pageUrl: string): Promise<string> {
+    let pageHost = '';
+    try { pageHost = new URL(pageUrl).hostname; } catch { return ''; }
+    const hrefs: string[] = [];
+    $('link[rel~="stylesheet"][href]').each((_i: any, el: any) => {
+        if (hrefs.length >= 3) return;
+        const href = $(el).attr('href');
+        if (!href) return;
+        let u: URL;
+        try { u = new URL(href, pageUrl); } catch { return; }
+        if (u.protocol !== 'http:' && u.protocol !== 'https:') return;
+        if (isBlockedBrandHost(u.hostname)) return;
+        if (!sameSite(u.hostname, pageHost)) return;
+        if (!hrefs.includes(u.href)) hrefs.push(u.href);
+    });
+    if (hrefs.length === 0) return '';
+
+    const MAX_SHEET_BYTES = 262144; // 256KB per sheet
+    const fetchOne = async (u: string): Promise<string> => {
+        try {
+            const host = new URL(u).hostname;
+            // Defense-in-depth vs DNS rebinding: resolve and reject private IPs.
+            try { const a = await dnsLookup(host); if (isBlockedBrandHost(a.address)) return ''; } catch { return ''; }
+            const ctrl = new AbortController();
+            const t = setTimeout(() => ctrl.abort(), 2000);
+            try {
+                // redirect:'manual' — a same-site sheet that 3xx-redirects to a
+                // private/metadata host would otherwise bypass the SSRF guards.
+                const r = await fetch(u, { signal: ctrl.signal, headers: { 'User-Agent': USER_AGENT_POOL[0], Accept: 'text/css,*/*;q=0.1' }, redirect: 'manual' });
+                if (r.status >= 300 && r.status < 400) return '';
+                if (!r.ok) return '';
+                const ct = r.headers.get('content-type') || '';
+                if (ct && !ct.includes('css') && !ct.includes('text/plain')) return '';
+                const buf = Buffer.from(await r.arrayBuffer());
+                return (buf.byteLength > MAX_SHEET_BYTES ? buf.subarray(0, MAX_SHEET_BYTES) : buf).toString('utf8');
+            } finally { clearTimeout(t); }
+        } catch { return ''; }
+    };
+    const all = await Promise.all(hrefs.map(fetchOne));
+    return all.join('\n').slice(0, 524288); // 512KB aggregate
 }
 
 /**
@@ -247,7 +405,8 @@ export async function crawlStream(
         sitemapUrl,
         extractText = true, extractLinks = true, extractImages = true,
         extractMeta = true, extractHeadings = true, extractTables = true,
-        extractStructuredData = true, extractEmails = true, extractPhones = true,
+        extractStructuredData = true, extractEmails = false, extractPhones = false,
+        extractBrand = false, brandFetchStylesheets = true,
         extractMarkdown = false, stripBoilerplate = true,
         chunkSize = 0, chunkOverlap = 200, cssSelector,
         maxDepth = 0, maxPages = 100,
@@ -310,6 +469,7 @@ export async function crawlStream(
         request: { url: string; loadedUrl?: string; userData?: Record<string, unknown> },
         $: any, responseHeaders: Record<string, string>,
         actualStatus: number, actualContentType: string | null, startTime: number,
+        brandComputedHits: ColorHit[] = [], brandExtraCss = '',
     ) {
         const pageUrl = request.loadedUrl ?? request.url;
         const data: PageData = emptyPage(pageUrl, {
@@ -319,6 +479,21 @@ export async function crawlStream(
 
         const html = $.html();
         data.pageSizeBytes = Buffer.byteLength(html, 'utf8');
+
+        // Capture brand CSS + theme-color BEFORE extractText/markdown strip <style> from $.
+        let brandCssText = '';
+        let brandThemeColorRaw: string | null = null;
+        if (extractBrand) {
+            const styleBlocks: string[] = [];
+            $('style').each((_i: any, el: any) => { const t = $(el).html(); if (t) styleBlocks.push(t); });
+            const inlineStyles: string[] = [];
+            $('[style]').each((_i: any, el: any) => { const s = $(el).attr('style'); if (s) inlineStyles.push(s); });
+            brandCssText = styleBlocks.join('\n') + '\n' + inlineStyles.join(';\n');
+            // theme-color may carry a media attr (e.g. dark mode); prefer the one without media.
+            const themeNoMedia = $('meta[name="theme-color"]:not([media])').attr('content');
+            brandThemeColorRaw = themeNoMedia || $('meta[name="theme-color"]').attr('content') || null;
+        }
+
         data.language = $('html').attr('lang') ?? null;
         data.canonicalUrl = $('link[rel="canonical"]').attr('href') ?? null;
         const robotsMeta = $('meta[name="robots"]').attr('content') ?? '';
@@ -515,16 +690,28 @@ export async function crawlStream(
         }
 
         // Detect "blocked-bot" responses where the server returned 200 but the
-        // body is a challenge page. Cheap heuristic — false positive risk on
+        // body is an access-control or challenge page. Cheap heuristic — false positive risk on
         // tiny pages that legitimately have this exact text.
         if (actualStatus === 200 && data.text) {
             const t = data.text.toLowerCase();
             if (t.includes('attention required') || t.includes('access denied') || t.includes('cloudflare ray id') || t.includes('checking your browser')) {
                 data.status = 'error';
-                data.error = 'Anti-bot challenge page detected (Cloudflare/WAF).';
+                data.error = 'Access-control or challenge page detected.';
                 data.errorType = 'blocked-bot';
                 data.errorRetryable = false;
             }
+        }
+
+        // Brand identity — only on a real success page (never on blocked/challenge pages).
+        if (extractBrand && data.status === 'success') {
+            const hits: ColorHit[] = [];
+            if (brandCssText) hits.push(...collectCssColors(brandCssText, 'style'));
+            if (brandExtraCss) hits.push(...collectCssColors(brandExtraCss, 'stylesheet'));
+            if (brandComputedHits.length) hits.push(...brandComputedHits);
+            const { themeColor, palette } = buildPalette(hits, brandThemeColorRaw);
+            data.themeColor = themeColor;
+            data.palette = palette;
+            data.logo = extractLogoCandidates($, pageUrl, data.structuredData);
         }
 
         data.responseTimeMs = Date.now() - startTime;
@@ -595,11 +782,14 @@ export async function crawlStream(
     const startUrls = htmlUrls.map(url => makeRequest(url, 0));
     const proxyConfiguration = proxyUrl ? new ProxyConfiguration({ proxyUrls: [proxyUrl] }) : undefined;
 
-    // Build per-request header builder: rotates UA + applies customHeaders
+    // Build per-request header builder: rotates UA + applies customHeaders.
+    // In brand mode, pin a fixed UA so rendered output (and thus the palette)
+    // is deterministic across runs.
     const buildHeaders = (): Record<string, string> => {
         const headers: Record<string, string> = { ...customHeaders };
-        if (rotateUserAgent && !headers['User-Agent'] && !headers['user-agent']) {
-            headers['User-Agent'] = pickUserAgent();
+        if (!headers['User-Agent'] && !headers['user-agent']) {
+            if (extractBrand) headers['User-Agent'] = USER_AGENT_POOL[0];
+            else if (rotateUserAgent) headers['User-Agent'] = pickUserAgent();
         }
         return headers;
     };
@@ -613,6 +803,11 @@ export async function crawlStream(
             preNavigationHooks: [async ({ page: pg }) => {
                 const headers = buildHeaders();
                 if (Object.keys(headers).length > 0) await pg.setExtraHTTPHeaders(headers);
+                if (extractBrand) {
+                    // Deterministic render env for stable brand colors.
+                    try { await pg.emulateMedia({ colorScheme: 'light' }); } catch {}
+                    try { await pg.setViewportSize({ width: 1280, height: 800 }); } catch {}
+                }
             }],
             async requestHandler({ request, page, response }: PlaywrightCrawlingContext) {
                 const startTime = Date.now();
@@ -628,12 +823,17 @@ export async function crawlStream(
                     actionScreenshots.push(key);
                 }
 
+                // Sample rendered brand colors from the live page BEFORE serializing to HTML.
+                const computedHits = extractBrand ? await sampleComputedColors(page) : [];
+
                 const html = await page.content();
                 const $ = cheerioLib.load(html);
                 const respHeaders: Record<string, string> = {};
                 for (const [k, v] of Object.entries(response?.headers() ?? {})) { respHeaders[k] = v; }
 
-                const { data, internalLinks } = await handlePage(request, $, respHeaders, response?.status() ?? 200, respHeaders['content-type'] ?? null, startTime);
+                const { data, internalLinks } = await handlePage(request, $, respHeaders, response?.status() ?? 200, respHeaders['content-type'] ?? null, startTime, computedHits);
+                data.engine = 'playwright';
+                data.usedPlaywright = true;
                 data.screenshots = actionScreenshots;
 
                 const redirectChain: { url: string; statusCode: number }[] = [];
@@ -673,7 +873,13 @@ export async function crawlStream(
                 const respHeaders: Record<string, string> = {};
                 if (response?.headers) { for (const [k, v] of Object.entries(response.headers)) { if (typeof v === 'string') respHeaders[k] = v; else if (Array.isArray(v)) respHeaders[k] = v.join(', '); } }
 
-                const { data, internalLinks } = await handlePage(request, $, respHeaders, response?.statusCode ?? 200, respHeaders['content-type'] ?? null, startTime);
+                // In Cheerio (no-JS) mode, computed colors aren't available; mine a
+                // bounded set of same-domain stylesheets instead.
+                const extraCss = (extractBrand && brandFetchStylesheets)
+                    ? await fetchBrandStylesheets($, request.loadedUrl ?? request.url)
+                    : '';
+
+                const { data, internalLinks } = await handlePage(request, $, respHeaders, response?.statusCode ?? 200, respHeaders['content-type'] ?? null, startTime, [], extraCss);
                 if (request.loadedUrl && request.loadedUrl !== request.url) data.redirectChain = [{ url: request.url, statusCode: 301 }];
 
                 if (adaptiveCrawling && data.status === 'success') {
@@ -713,16 +919,23 @@ export async function crawlStream(
                 preNavigationHooks: [async ({ page: pg }) => {
                     const headers = buildHeaders();
                     if (Object.keys(headers).length > 0) await pg.setExtraHTTPHeaders(headers);
+                    if (extractBrand) {
+                        try { await pg.emulateMedia({ colorScheme: 'light' }); } catch {}
+                        try { await pg.setViewportSize({ width: 1280, height: 800 }); } catch {}
+                    }
                 }],
                 async requestHandler({ request, page, response }: PlaywrightCrawlingContext) {
                     const startTime = Date.now();
                     if (waitForSelector) { try { await page.waitForSelector(waitForSelector, { timeout: waitForMs || 10000 }); } catch {} }
                     else { await page.waitForTimeout(waitForMs || 2000); }
+                    const computedHits = extractBrand ? await sampleComputedColors(page) : [];
                     const html = await page.content();
                     const $ = cheerioLib.load(html);
                     const respHeaders: Record<string, string> = {};
                     for (const [k, v] of Object.entries(response?.headers() ?? {})) { respHeaders[k] = v; }
-                    const { data } = await handlePage(request, $, respHeaders, response?.status() ?? 200, respHeaders['content-type'] ?? null, startTime);
+                    const { data } = await handlePage(request, $, respHeaders, response?.status() ?? 200, respHeaders['content-type'] ?? null, startTime, computedHits);
+                    data.engine = 'playwright';
+                    data.usedPlaywright = true;
                     const rc: { url: string; statusCode: number }[] = [];
                     let rr = response?.request()?.redirectedFrom() ?? null;
                     while (rr) { const rResp = await rr.response(); rc.unshift({ url: rr.url(), statusCode: rResp?.status() ?? 301 }); rr = rr.redirectedFrom(); }

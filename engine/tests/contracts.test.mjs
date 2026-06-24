@@ -8,13 +8,25 @@ import {
 } from '../dist/contracts.js';
 
 test('real-estate contract is discoverable with required extraction fields', () => {
-    assert.deepEqual(listExtractionContracts(), ['product-page', 'real-estate-listing']);
+    assert.deepEqual(listExtractionContracts(), ['docs-page', 'product-page', 'real-estate-listing']);
 
     const contract = getExtractionContract('real-estate-listing');
     assert.equal(contract.name, 'real-estate-listing');
     assert.equal(contract.domain, 'real-estate');
     assert.deepEqual(contract.requiredFields, ['title', 'price', 'location', 'sourceUrl']);
     assert.equal(contract.schema.properties.price.type, 'object');
+});
+
+test('docs-page contract is discoverable with public documentation fields', () => {
+    const contract = getExtractionContract('docs-page');
+
+    assert.equal(contract.name, 'docs-page');
+    assert.equal(contract.domain, 'documentation');
+    assert.deepEqual(contract.requiredFields, ['title', 'summary', 'sourceUrl']);
+    assert.equal(contract.schema.properties.apiEndpoints.type, 'array');
+    assert.equal(contract.schema.properties.codeExamples.type, 'array');
+    assert.match(contract.prompt, /public documentation page/);
+    assert.match(contract.prompt, /Do not extract contributor identities/);
 });
 
 test('product-page contract is discoverable with required extraction fields', () => {
@@ -24,6 +36,20 @@ test('product-page contract is discoverable with required extraction fields', ()
     assert.equal(contract.domain, 'ecommerce');
     assert.deepEqual(contract.requiredFields, ['name', 'price', 'sourceUrl']);
     assert.equal(contract.schema.properties.price.type, 'object');
+});
+
+test('contract validation accepts docs-page public summary evidence', () => {
+    const contract = getExtractionContract('docs-page');
+
+    const result = validateContractData(contract, {
+        title: 'REST API issues documentation',
+        summary: 'Explains public issue endpoints and request parameters.',
+        sourceUrl: 'https://docs.example.com/rest/issues',
+        headings: ['List issues', 'Create an issue'],
+    });
+
+    assert.equal(result.valid, true);
+    assert.deepEqual(result.missingRequiredFields, []);
 });
 
 test('contract validation reports missing required fields without discarding data', () => {
