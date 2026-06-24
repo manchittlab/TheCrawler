@@ -55,6 +55,16 @@ export interface ExtractOptions {
      * always forced true regardless of this setting.
      */
     crawlOptions?: Omit<CrawlOptions, 'urls' | 'extractMarkdown'>;
+    /**
+     * Anti-hallucination guard. When true, after the LLM returns, every leaf
+     * string/number value is checked against the source markdown; any value that
+     * cannot be traced to the page (not a substring, no shared digit-run, and
+     * <60% of its significant tokens present) is set to null. Pure inventions get
+     * dropped; reformatted/paraphrased values that still draw on the page survive.
+     * Booleans and nulls are left untouched (cannot be substring-verified).
+     * Default false (no behavior change for existing callers).
+     */
+    groundToSource?: boolean;
 }
 
 export type ExtractErrorType =
@@ -78,6 +88,11 @@ export interface ExtractResult {
     /** Token usage if the server reported it. */
     promptTokens: number | null;
     completionTokens: number | null;
+    /**
+     * Dot-paths of fields nulled by the groundToSource guard (empty if the guard
+     * was off or nothing was dropped). Surfaced for transparency/auditing.
+     */
+    nulledFields?: string[];
     /** End-to-end milliseconds: crawl + LLM call. */
     responseTimeMs: number;
     crawlMs: number | null;
@@ -88,6 +103,12 @@ function buildSystemMessage(opts: ExtractOptions): string {
     const parts: string[] = [];
     parts.push(
         'You extract structured data from web page content. Return ONLY a single JSON object — no prose, no markdown fences, no commentary. If a requested field cannot be determined from the content, set it to null.',
+    );
+    // Grounding directive (always on): extraction must be page-derived, never
+    // filled from the model's prior knowledge. This is the cheapest, uniform
+    // anti-hallucination rule and applies to every extraction.
+    parts.push(
+        'GROUNDING RULE: Extract only values that are actually present in the page content provided. Do NOT infer, calculate, guess, or supply a value from your own prior/world knowledge. If a value is not stated in the page content, the field MUST be null. Copy values as they appear in the page rather than reformatting them.',
     );
     if (opts.jsonSchema) {
         parts.push('The JSON object must conform to this JSON Schema:');
@@ -187,6 +208,99 @@ async function callLlm(
     }
 }
 
+/** Precomputed index of the source text the model saw, for grounding checks. */
+interface SourceIndex {
+    norm: string;          // NFKD-deaccented, lowercased, whitespace-collapsed full text
+    tokens: Set<string>;   // unique word tokens (Unicode letters/digits, length >= 3)
+    numbers: Set<string>;  // canonical numeric runs found in source (commas stripped)
+}
+
+/** NFKD-deaccent + lowercase + collapse whitespace. Unicode-aware. */
+function normalizeText(s: string): string {
+    return s.normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+/** Canonical numeric form of a value: first digit run (with optional decimal), commas dropped. */
+function canonNum(value: string | number): string {
+    const m = String(value).replace(/,/g, '').match(/\d+(?:\.\d+)?/);
+    return m ? m[0] : '';
+}
+
+export function buildSourceIndex(src: string): SourceIndex {
+    const norm = normalizeText(src);
+    const tokens = new Set(norm.match(/[\p{L}\p{N}]{3,}/gu) ?? []);
+    const numbers = new Set<string>();
+    for (const run of src.match(/\d[\d,]*(?:\.\d+)?/g) ?? []) numbers.add(run.replace(/,/g, ''));
+    return { norm, tokens, numbers };
+}
+
+const DANGEROUS_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
+const MAX_GROUND_DEPTH = 50;
+
+/**
+ * Deterministic anti-hallucination guard. Walks the parsed object and nulls any
+ * leaf string/number value that cannot be traced back to the source text the
+ * model actually saw. A value is grounded if ANY of:
+ *   - its normalized form is a substring of the normalized source,
+ *   - it is mostly-numeric and its canonical number appears as a source number
+ *     token (exact run — NOT a concatenated-digit blob, so "12"+"34" can't vouch
+ *     for an invented "1234"),
+ *   - >=60% of its UNIQUE significant tokens appear in the source token set
+ *     (exact token match — spares paraphrase, resists repeated-token gaming).
+ * Booleans/null are passed through unchanged (a boolean cannot be substring-
+ * verified — groundToSource is a string/number guard only). Skips prototype-
+ * polluting keys and bounds recursion depth.
+ */
+export function groundData(value: any, src: SourceIndex, path: string, nulled: string[], depth = 0): any {
+    if (depth > MAX_GROUND_DEPTH) return value;
+    if (value === null || value === undefined || typeof value === 'boolean') return value;
+    if (typeof value === 'number' || typeof value === 'string') {
+        if (isGrounded(value, src)) return value;
+        nulled.push(path || '(root)');
+        return null;
+    }
+    if (Array.isArray(value)) {
+        return value.map((v, i) => groundData(v, src, `${path}[${i}]`, nulled, depth + 1));
+    }
+    if (typeof value === 'object') {
+        const out: Record<string, any> = {};
+        for (const k of Object.keys(value)) {
+            if (DANGEROUS_KEYS.has(k)) continue; // never assign __proto__/constructor/prototype
+            out[k] = groundData(value[k], src, path ? `${path}.${k}` : k, nulled, depth + 1);
+        }
+        return out;
+    }
+    return value;
+}
+
+export function isGrounded(value: string | number, src: SourceIndex): boolean {
+    if (typeof value === 'number') {
+        const c = canonNum(value);
+        return c.length > 0 && src.numbers.has(c);
+    }
+    const norm = normalizeText(value);
+    if (norm.length === 0) return true; // empty string — nothing to verify, leave as-is
+    // 1. Verbatim (normalized) substring → grounded.
+    if (src.norm.includes(norm)) return true;
+    const alnum = norm.replace(/[^\p{L}\p{N}]/gu, '');
+    const digits = norm.replace(/[^0-9]/g, '');
+    // 2. Mostly-numeric value (price / number / code): grounded only if its
+    //    canonical number is an exact source number token. Guarded to "mostly
+    //    numeric" so a date like "April 2023" can't pass on the year alone.
+    if (alnum.length > 0 && digits.length >= 2 && digits.length / alnum.length >= 0.6) {
+        const c = canonNum(value);
+        return c.length > 0 && src.numbers.has(c);
+    }
+    const valTokens = [...new Set(norm.match(/[\p{L}\p{N}]{3,}/gu) ?? [])];
+    // 3. Short factual value (<=3 unique tokens — names, dates, labels): must be
+    //    verbatim (already failed the substring check above) → ungrounded.
+    if (valTokens.length <= 3) return false;
+    // 4. Long prose: paraphrase-tolerant — grounded if >=60% of its unique tokens
+    //    are present in the source token set (exact match, no repeated-token game).
+    const present = valTokens.filter((t) => src.tokens.has(t)).length;
+    return present / valTokens.length >= 0.6;
+}
+
 function classifyLlmError(err: any): ExtractErrorType {
     const m = String(err?.message || err || '').toLowerCase();
     if (m.includes('aborted') || m.includes('timeout')) return 'llm-timeout';
@@ -257,7 +371,12 @@ export async function extract(options: ExtractOptions): Promise<ExtractResult[]>
             continue;
         }
 
-        // 2. Call the LLM with the page markdown.
+        // 2. Call the LLM with the page markdown. Keep the exact text the model
+        //    sees (post-truncation) so the grounding guard verifies against the
+        //    SAME content — not text the model never read.
+        const sentMarkdown = page.markdown.length > charLimit
+            ? page.markdown.slice(0, charLimit)
+            : page.markdown;
         const userMsg = buildUserMessage(page.url, page.markdown, charLimit);
         const startLlm = Date.now();
         let raw = '';
@@ -308,10 +427,23 @@ export async function extract(options: ExtractOptions): Promise<ExtractResult[]>
             continue;
         }
 
+        let finalData = parsed;
+        const nulledFields: string[] = [];
+        if (options.groundToSource) {
+            try {
+                const srcIndex = buildSourceIndex(sentMarkdown);
+                finalData = groundData(parsed, srcIndex, '', nulledFields);
+            } catch {
+                // Grounding must never break extraction — fall back to ungrounded data.
+                finalData = parsed;
+                nulledFields.length = 0;
+            }
+        }
+
         results.push({
-            url: page.url, data: parsed, status: 'success',
+            url: page.url, data: finalData, status: 'success',
             error: null, errorType: null, rawResponse: raw,
-            promptTokens, completionTokens,
+            promptTokens, completionTokens, nulledFields,
             responseTimeMs: Date.now() - startTotal, crawlMs, llmMs,
         });
     }
