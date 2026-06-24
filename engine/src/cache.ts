@@ -43,6 +43,12 @@ export class CrawlCache {
             usePlaywright: opts.usePlaywright ?? false,
             extractBrand: opts.extractBrand === true,
             brandFetchStylesheets: opts.brandFetchStylesheets !== false,
+            onlyMainContent: opts.onlyMainContent === true,
+            includeTags: (opts.includeTags || []).join(','),
+            excludeTags: (opts.excludeTags || []).join(','),
+            extractHtml: opts.extractHtml === true,
+            extractRawHtml: opts.extractRawHtml === true,
+            waitFor: opts.waitFor ?? null,
         };
         const payload = url + '|' + JSON.stringify(flagSubset, Object.keys(flagSubset).sort());
         return createHash('sha256').update(payload).digest('hex').slice(0, 16);

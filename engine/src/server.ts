@@ -91,6 +91,8 @@ function mapDiscoveredLinks(result: CrawlResult) {
 const SCRAPE_FORMATS = new Set([
     'markdown',
     'text',
+    'html',
+    'rawHtml',
     'metadata',
     'links',
     'images',
@@ -142,6 +144,8 @@ function buildScrapePayload(page: CrawlResult['pages'][number], formats: Set<str
         };
     }
     if (formats.has('markdown')) data.markdown = page.markdown;
+    if (formats.has('html')) data.html = page.html;
+    if (formats.has('rawHtml')) data.rawHtml = page.rawHtml;
     if (formats.has('text')) data.text = page.text;
     if (formats.has('links')) data.links = page.links;
     if (formats.has('images')) data.images = page.images;
@@ -281,6 +285,11 @@ const server = createServer(async (req, res) => {
                 extractStructuredData: needsStructuredData,
                 extractEmails: formats.has('emails'),
                 extractPhones: formats.has('phones'),
+                extractHtml: formats.has('html'),
+                extractRawHtml: formats.has('rawHtml'),
+                onlyMainContent: body.onlyMainContent ?? false,
+                includeTags: body.includeTags,
+                excludeTags: body.excludeTags,
                 stripBoilerplate: body.stripBoilerplate ?? true,
                 chunkSize: body.chunkSize ?? (formats.has('chunks') ? 2000 : 0),
                 chunkOverlap: body.chunkOverlap ?? 200,
@@ -290,6 +299,7 @@ const server = createServer(async (req, res) => {
                 adaptiveCrawling: body.adaptiveCrawling ?? false,
                 waitForSelector: body.waitForSelector,
                 waitForMs: body.waitForMs ?? 0,
+                waitFor: body.waitFor,
                 actions: body.actions,
                 customHeaders: body.customHeaders,
                 proxyUrl: body.proxyUrl,

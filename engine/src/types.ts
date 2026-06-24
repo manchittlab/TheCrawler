@@ -98,6 +98,21 @@ export interface CrawlOptions {
      */
     brandFetchStylesheets?: boolean;
     /**
+     * Restrict text/markdown/links/html output to the main content, dropping
+     * nav/header/footer/aside/cookie banners. Firecrawl-compatible. Default false.
+     */
+    onlyMainContent?: boolean;
+    /** Keep ONLY elements matching these CSS selectors in content output. */
+    includeTags?: string[];
+    /** Remove elements matching these CSS selectors from content output. */
+    excludeTags?: string[];
+    /** Include processed/cleaned HTML in output (PageData.html). Default false. */
+    extractHtml?: boolean;
+    /** Include raw, unprocessed serialized HTML in output (PageData.rawHtml). Default false. */
+    extractRawHtml?: boolean;
+    /** Firecrawl-compatible alias for waitForMs (ms to wait after load; Playwright only). */
+    waitFor?: number;
+    /**
      * Optional in-memory cache config. See CacheOptions.
      */
     cache?: CacheOptions;
@@ -190,6 +205,10 @@ export interface PageData {
      * Absolute URLs; SVG/transparent-PNG preferred.
      */
     logo: { url: string; source: string; type: string | null; confidence: number }[];
+    /** Processed/cleaned HTML (main content when onlyMainContent). Populated when extractHtml. */
+    html: string | null;
+    /** Raw, unprocessed serialized HTML. Populated when extractRawHtml. */
+    rawHtml: string | null;
 }
 
 export interface CrawlResult {

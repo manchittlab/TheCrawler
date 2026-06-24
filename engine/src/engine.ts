@@ -217,6 +217,7 @@ function emptyPage(url: string, overrides: Partial<PageData> = {}): PageData {
         responseHeaders: {}, scrapedAt: new Date().toISOString(), status: 'error', error: null,
         errorType: null, errorRetryable: false, fromCache: false,
         engine: 'cheerio', usedPlaywright: false, themeColor: null, palette: [], logo: [],
+        html: null, rawHtml: null,
         ...overrides,
     };
 }
@@ -407,6 +408,8 @@ export async function crawlStream(
         extractMeta = true, extractHeadings = true, extractTables = true,
         extractStructuredData = true, extractEmails = false, extractPhones = false,
         extractBrand = false, brandFetchStylesheets = true,
+        onlyMainContent = false, includeTags = [], excludeTags = [],
+        extractHtml = false, extractRawHtml = false, waitFor,
         extractMarkdown = false, stripBoilerplate = true,
         chunkSize = 0, chunkOverlap = 200, cssSelector,
         maxDepth = 0, maxPages = 100,
@@ -420,6 +423,9 @@ export async function crawlStream(
         onStoreValue,
         logger: log = defaultLogger,
     } = options;
+
+    // Firecrawl-compatible `waitFor` is an alias for `waitForMs`.
+    const effectiveWaitMs = waitFor != null ? waitFor : waitForMs;
 
     // Cache setup
     const cacheEnabled = cacheOpts?.enabled ?? false;
@@ -494,6 +500,33 @@ export async function crawlStream(
             brandThemeColorRaw = themeNoMedia || $('meta[name="theme-color"]').attr('content') || null;
         }
 
+        if (extractRawHtml) data.rawHtml = html.slice(0, 500000);
+
+        // Content view for text/markdown/links/html (Firecrawl-style controls). When
+        // no content control is active, this is the original $ — zero behavior change.
+        let $content: any = $;
+        if (onlyMainContent || includeTags.length > 0 || excludeTags.length > 0) {
+            $content = cheerioLib.load(html);
+            if (excludeTags.length > 0) { try { $content(excludeTags.join(',')).remove(); } catch {} }
+            if (includeTags.length > 0) {
+                try {
+                    const keep = $content(includeTags.join(',')).clone();
+                    const body = $content('body').empty();
+                    keep.each((_i: any, el: any) => { body.append(el); });
+                } catch {}
+            }
+            if (onlyMainContent) {
+                const main = $content('main, article, [role="main"]');
+                if (main.length) {
+                    const kept = main.clone();
+                    const body = $content('body').empty();
+                    kept.each((_i: any, el: any) => { body.append(el); });
+                } else {
+                    $content('nav, header, footer, aside, [role="navigation"], [role="banner"], [role="contentinfo"], .sidebar, .nav, .footer, .header, .cookie-banner, .cookie-notice, #cookie-notice').remove();
+                }
+            }
+        }
+
         data.language = $('html').attr('lang') ?? null;
         data.canonicalUrl = $('link[rel="canonical"]').attr('href') ?? null;
         const robotsMeta = $('meta[name="robots"]').attr('content') ?? '';
@@ -526,7 +559,7 @@ export async function crawlStream(
         }
 
         if (extractMarkdown) {
-            const $md = $.root().clone();
+            const $md = $content.root().clone();
             if (stripBoilerplate) {
                 $md.find('nav, header, footer, aside, [role="navigation"], [role="banner"], [role="contentinfo"], .sidebar, .nav, .footer, .header, .cookie-banner, .cookie-notice, #cookie-notice').remove();
             }
@@ -540,16 +573,23 @@ export async function crawlStream(
             if (chunkSize > 0 && md.length > 0) data.chunks = chunkText(md, chunkSize, chunkOverlap);
         }
 
+        if (extractHtml) {
+            const $h = $content.root().clone();
+            $h.find('script, style, noscript, iframe').remove();
+            const root = $h.find('main, article, [role="main"]').html() || $h.find('body').html() || $h.html() || '';
+            data.html = root.slice(0, 200000);
+        }
+
         if (extractText) {
-            $('script, style, noscript').remove();
-            data.text = $('body').text().replace(/\s+/g, ' ').trim().slice(0, 50000);
+            $content('script, style, noscript').remove();
+            data.text = $content('body').text().replace(/\s+/g, ' ').trim().slice(0, 50000);
         }
 
         if (extractHeadings) {
-            $('h1, h2, h3, h4, h5, h6').each((_i: any, el: any) => {
+            $content('h1, h2, h3, h4, h5, h6').each((_i: any, el: any) => {
                 const tag = (el as any).tagName ?? '';
                 const level = parseInt(tag.replace('h', ''), 10);
-                const text = $(el).text().trim();
+                const text = $content(el).text().trim();
                 if (text) data.headings.push({ level, text: text.slice(0, 200) });
             });
         }
@@ -558,10 +598,10 @@ export async function crawlStream(
             const pageOrigin = new URL(pageUrl).origin;
             const socialDomains = ['facebook.com', 'twitter.com', 'x.com', 'linkedin.com', 'instagram.com', 'youtube.com', 'tiktok.com', 'github.com', 'pinterest.com'];
             const socialSet = new Set<string>();
-            $('a[href]').each((_i: any, el: any) => {
-                const href = $(el).attr('href') ?? '';
-                const text = $(el).text().trim();
-                const rel = $(el).attr('rel') ?? null;
+            $content('a[href]').each((_i: any, el: any) => {
+                const href = $content(el).attr('href') ?? '';
+                const text = $content(el).text().trim();
+                const rel = $content(el).attr('rel') ?? null;
                 try {
                     const absolute = new URL(href, pageUrl).href;
                     if (absolute.startsWith('http')) {
@@ -811,8 +851,8 @@ export async function crawlStream(
             }],
             async requestHandler({ request, page, response }: PlaywrightCrawlingContext) {
                 const startTime = Date.now();
-                if (waitForSelector) { try { await page.waitForSelector(waitForSelector, { timeout: waitForMs || 10000 }); } catch {} }
-                else if (waitForMs > 0) { await page.waitForTimeout(waitForMs); }
+                if (waitForSelector) { try { await page.waitForSelector(waitForSelector, { timeout: effectiveWaitMs || 10000 }); } catch {} }
+                else if (effectiveWaitMs > 0) { await page.waitForTimeout(effectiveWaitMs); }
 
                 let actionScreenshots: string[] = [];
                 if (actions.length > 0) actionScreenshots = await executeActions(page, actions, onStoreValue);
@@ -926,8 +966,8 @@ export async function crawlStream(
                 }],
                 async requestHandler({ request, page, response }: PlaywrightCrawlingContext) {
                     const startTime = Date.now();
-                    if (waitForSelector) { try { await page.waitForSelector(waitForSelector, { timeout: waitForMs || 10000 }); } catch {} }
-                    else { await page.waitForTimeout(waitForMs || 2000); }
+                    if (waitForSelector) { try { await page.waitForSelector(waitForSelector, { timeout: effectiveWaitMs || 10000 }); } catch {} }
+                    else { await page.waitForTimeout(effectiveWaitMs || 2000); }
                     const computedHits = extractBrand ? await sampleComputedColors(page) : [];
                     const html = await page.content();
                     const $ = cheerioLib.load(html);

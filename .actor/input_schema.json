@@ -68,6 +68,49 @@
             "default": false,
             "editor": "checkbox"
         },
+        "onlyMainContent": {
+            "title": "Only Main Content",
+            "type": "boolean",
+            "description": "Restrict text/markdown/links/html output to the main content (drops nav, header, footer, sidebar, cookie banners). Firecrawl-compatible.",
+            "default": false,
+            "editor": "checkbox"
+        },
+        "includeTags": {
+            "title": "Include Tags (CSS selectors)",
+            "type": "array",
+            "description": "Keep ONLY elements matching these CSS selectors in content output. Example: article, .post-body",
+            "editor": "stringList",
+            "items": { "type": "string" }
+        },
+        "excludeTags": {
+            "title": "Exclude Tags (CSS selectors)",
+            "type": "array",
+            "description": "Remove elements matching these CSS selectors from content output. Example: nav, footer, .ads",
+            "editor": "stringList",
+            "items": { "type": "string" }
+        },
+        "extractHtml": {
+            "title": "Extract HTML",
+            "type": "boolean",
+            "description": "Include processed/cleaned HTML in output (html field).",
+            "default": false,
+            "editor": "checkbox"
+        },
+        "extractRawHtml": {
+            "title": "Extract Raw HTML",
+            "type": "boolean",
+            "description": "Include the raw, unprocessed serialized HTML in output (rawHtml field).",
+            "default": false,
+            "editor": "checkbox"
+        },
+        "waitFor": {
+            "title": "Wait For (ms)",
+            "type": "integer",
+            "description": "Firecrawl-compatible alias for Wait (ms). Milliseconds to wait after load before extracting (Playwright only).",
+            "minimum": 0,
+            "maximum": 30000,
+            "editor": "number"
+        },
         "extractEmails": {
             "title": "Extract Email-like Text",
             "type": "boolean",
