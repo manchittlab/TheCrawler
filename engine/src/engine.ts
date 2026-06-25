@@ -941,7 +941,7 @@ export async function crawlStream(
         });
         await crawler.run(startUrls);
     } else {
-        const spaUrls: string[] = [];
+        const spaUrls: { url: string; depth: number }[] = [];
         const crawler = new CheerioCrawler({
             maxRequestsPerCrawl: maxPages, proxyConfiguration,
             requestQueue,
@@ -971,7 +971,7 @@ export async function crawlStream(
                     const hasSpaRoot = $('div#root, div#app, div#__next, div#__nuxt, div#__svelte').length > 0;
                     if (textLen < 200 || (hasSpaRoot && textLen < 500)) {
                         log.info(`Adaptive: SPA detected on ${request.url} (${textLen} chars), queuing for Playwright`);
-                        spaUrls.push(request.loadedUrl || request.url);
+                        spaUrls.push({ url: request.loadedUrl || request.url, depth: (request.userData?.depth as number ?? 0) });
                         return;
                     }
                 }
@@ -996,7 +996,9 @@ export async function crawlStream(
             log.info(`Adaptive: re-scraping ${spaUrls.length} SPA page(s) with Playwright`);
             const playwrightQueue = await RequestQueue.open(`thecrawler-${runId}-playwright`);
             const pwCrawler = new PlaywrightCrawler({
-                maxRequestsPerCrawl: spaUrls.length, proxyConfiguration,
+                // Allow room beyond the SPA pages themselves so their links can be
+                // followed (bounded overall by the pagesScraped < maxPages guard).
+                maxRequestsPerCrawl: maxPages, proxyConfiguration,
                 requestQueue: playwrightQueue,
                 maxRequestRetries: requestRetries,
                 requestHandlerTimeoutSecs: requestTimeoutSecs,
@@ -1009,6 +1011,7 @@ export async function crawlStream(
                     }
                 }],
                 async requestHandler({ request, page, response }: PlaywrightCrawlingContext) {
+                    if (pagesScraped >= maxPages) return; // overall page budget (shared with the cheerio pass)
                     const startTime = Date.now();
                     if (waitForSelector) { try { await page.waitForSelector(waitForSelector, { timeout: effectiveWaitMs || 10000 }); } catch {} }
                     else { await page.waitForTimeout(effectiveWaitMs || 2000); }
@@ -1017,7 +1020,7 @@ export async function crawlStream(
                     const $ = cheerioLib.load(html);
                     const respHeaders: Record<string, string> = {};
                     for (const [k, v] of Object.entries(response?.headers() ?? {})) { respHeaders[k] = v; }
-                    const { data } = await handlePage(request, $, respHeaders, response?.status() ?? 200, respHeaders['content-type'] ?? null, startTime, computedHits);
+                    const { data, internalLinks } = await handlePage(request, $, respHeaders, response?.status() ?? 200, respHeaders['content-type'] ?? null, startTime, computedHits);
                     data.engine = 'playwright';
                     data.usedPlaywright = true;
                     const rc: { url: string; statusCode: number }[] = [];
@@ -1027,10 +1030,19 @@ export async function crawlStream(
                     if (cache && data.status === 'success') cache.set(CrawlCache.keyFor(data.url, options), data);
                     await onPageData(data);
                     pagesScraped++;
+                    // Follow links discovered in the RENDERED SPA page (the cheerio
+                    // pass saw none) so adaptive crawls reach every public page.
+                    if (maxDepth > 0 && (request.userData?.depth as number ?? 0) < maxDepth) {
+                        for (const link of internalLinks.slice(0, 50)) {
+                            if (excludeGlobs.length > 0 && excludeGlobs.some(g => matchGlob(link.href, g))) continue;
+                            if (includeGlobs.length > 0 && !includeGlobs.some(g => matchGlob(link.href, g))) continue;
+                            await pwCrawler.addRequests([makeRequest(link.href, (request.userData?.depth as number ?? 0) + 1)]);
+                        }
+                    }
                 },
                 async failedRequestHandler({ request }) { await failedHandler(request); },
             });
-            await pwCrawler.run(spaUrls.map(u => makeRequest(u, 0)));
+            await pwCrawler.run(spaUrls.map(s => makeRequest(s.url, s.depth)));
         }
     }
 
