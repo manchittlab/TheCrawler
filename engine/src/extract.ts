@@ -9,6 +9,7 @@
  */
 
 import { crawl } from './engine.js';
+import { safeFetch } from './ssrf.js';
 import type { CrawlOptions, CrawlErrorType } from './types.js';
 
 export interface LlmConfig {
@@ -65,6 +66,16 @@ export interface ExtractOptions {
      * Default false (no behavior change for existing callers).
      */
     groundToSource?: boolean;
+    /**
+     * SSRF guard for the LLM endpoint. When true, `llm.baseUrl` is treated as
+     * UNTRUSTED (user-supplied) and fetched via `safeFetch` — its host is
+     * validated, DNS-resolved (private resolved IPs rejected), and redirects are
+     * followed manually with per-hop re-validation. Leave false (default) when
+     * the endpoint is operator-configured (env / the LAN worker's own Qwen),
+     * which is legitimately a private address. The request boundary (server.ts /
+     * the hosted route) sets this true only for caller-supplied `llmBaseUrl`.
+     */
+    guardLlmUrl?: boolean;
 }
 
 export type ExtractErrorType =
@@ -133,9 +144,17 @@ async function callLlm(
     systemMsg: string,
     userMsg: string,
     jsonSchema?: object,
+    guard = false,
 ): Promise<{ content: string; promptTokens: number | null; completionTokens: number | null }> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), (llm.timeoutSecs ?? 120) * 1000);
+    // When the endpoint is untrusted (user-supplied), route through safeFetch so
+    // the host is validated + DNS-resolved + redirects are manually re-checked.
+    // Operator endpoints (default) use plain fetch so a private LAN URL works.
+    const doFetch: (url: string, init: { method: string; headers: Record<string, string>; body: string; signal: AbortSignal }) => Promise<Response> =
+        guard
+            ? (url, init) => safeFetch(url, init)
+            : (url, init) => fetch(url, init);
     try {
         const responseFormatFor = (responseFormatType: 'json_schema' | 'json_object' | 'text') => {
             if (responseFormatType === 'json_schema') {
@@ -161,24 +180,22 @@ async function callLlm(
         });
         const primaryFormat = jsonSchema ? 'json_schema' : 'json_object';
 
-        let r = await fetch(llm.baseUrl, {
+        const headers = {
+            'Content-Type': 'application/json',
+            ...(llm.apiKey ? { Authorization: `Bearer ${llm.apiKey}` } : {}),
+        };
+        let r = await doFetch(llm.baseUrl, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                ...(llm.apiKey ? { Authorization: `Bearer ${llm.apiKey}` } : {}),
-            },
+            headers,
             body: body(primaryFormat),
             signal: controller.signal,
         });
         if (!r.ok) {
             const txt = await r.text().catch(() => '');
             if (r.status === 400 && (txt.includes('response_format') || txt.includes('json_schema'))) {
-                r = await fetch(llm.baseUrl, {
+                r = await doFetch(llm.baseUrl, {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...(llm.apiKey ? { Authorization: `Bearer ${llm.apiKey}` } : {}),
-                    },
+                    headers,
                     body: body('text'),
                     signal: controller.signal,
                 });
@@ -383,7 +400,7 @@ export async function extract(options: ExtractOptions): Promise<ExtractResult[]>
         let promptTokens: number | null = null;
         let completionTokens: number | null = null;
         try {
-            const llmResp = await callLlm(options.llm, systemMsg, userMsg, options.jsonSchema);
+            const llmResp = await callLlm(options.llm, systemMsg, userMsg, options.jsonSchema, options.guardLlmUrl);
             raw = llmResp.content;
             promptTokens = llmResp.promptTokens;
             completionTokens = llmResp.completionTokens;

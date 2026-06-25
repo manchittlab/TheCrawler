@@ -26,11 +26,30 @@ import { crawl, parseSitemap } from './engine.js';
 import { extract } from './extract.js';
 import { attachContractValidation, getExtractionContract, listExtractionContracts } from './contracts.js';
 import { diagnoseContractReadiness, renderContractDiagnosticReport, summarizeContractDiagnostics } from './diagnostics.js';
+import { assertPublicHttpUrl } from './ssrf.js';
 import type { CrawlOptions, CrawlResult } from './types.js';
 
 const DEFAULT_LLM_BASEURL = process.env.THECRAWLER_LLM_BASEURL || '';
 const DEFAULT_LLM_MODEL = process.env.THECRAWLER_LLM_MODEL || '';
 const DEFAULT_LLM_API_KEY = process.env.THECRAWLER_LLM_API_KEY || '';
+
+// SSRF protection. HTTP callers of this server are untrusted, so by default we
+// reject target URLs / user-supplied llmBaseUrls that point at private, loopback,
+// or internal hosts. Self-host / trusted deployments (and the test harness, which
+// crawls 127.0.0.1 fixtures) opt out with THECRAWLER_ALLOW_PRIVATE_HOSTS=1.
+const ALLOW_PRIVATE_HOSTS = process.env.THECRAWLER_ALLOW_PRIVATE_HOSTS === '1';
+
+/** Returns an SSRF rejection reason if any provided URL is blocked, else null. */
+function blockedUrl(urls: unknown): string | null {
+    if (ALLOW_PRIVATE_HOSTS) return null;
+    const list = Array.isArray(urls) ? urls : [urls];
+    for (const u of list) {
+        if (typeof u !== 'string' || u.length === 0) continue;
+        const g = assertPublicHttpUrl(u);
+        if (!g.ok) return `Blocked URL "${u.slice(0, 80)}": ${g.reason}`;
+    }
+    return null;
+}
 
 const PORT = parseInt(process.argv.find((_a, i, arr) => arr[i - 1] === '--port') || '3000', 10);
 const API_KEY = process.env.THECRAWLER_API_KEY || '';
@@ -218,6 +237,8 @@ const server = createServer(async (req, res) => {
                 json(res, 400, { error: 'Missing required field: urls (string array)' });
                 return;
             }
+            const crawlBlk = blockedUrl(body.urls);
+            if (crawlBlk) { json(res, 400, { error: crawlBlk, code: 'ssrf-blocked' }); return; }
             const opts: CrawlOptions = {
                 urls: body.urls,
                 extractText: body.extractText ?? true,
@@ -262,6 +283,8 @@ const server = createServer(async (req, res) => {
                 json(res, 400, { error: 'Missing required field: url (string)' });
                 return;
             }
+            const scrapeBlk = blockedUrl(body.url);
+            if (scrapeBlk) { json(res, 400, { error: scrapeBlk, code: 'ssrf-blocked' }); return; }
             const { formats, unknown, invalid } = parseScrapeFormats(body.formats);
             if (invalid) {
                 json(res, 400, { error: 'formats must be an array of strings', allowedFormats: [...SCRAPE_FORMATS].sort() });
@@ -329,6 +352,8 @@ const server = createServer(async (req, res) => {
                 json(res, 400, { error: 'Missing required field: url (string)' });
                 return;
             }
+            const mdBlk = blockedUrl(targetUrl);
+            if (mdBlk) { json(res, 400, { error: mdBlk, code: 'ssrf-blocked' }); return; }
             const result = await crawl({
                 urls: [targetUrl],
                 extractMarkdown: true,
@@ -375,6 +400,8 @@ const server = createServer(async (req, res) => {
                 json(res, 400, { error: 'Missing required field: url (string)' });
                 return;
             }
+            const mapBlk = blockedUrl(body.url);
+            if (mapBlk) { json(res, 400, { error: mapBlk, code: 'ssrf-blocked' }); return; }
             const result = await crawl({
                 urls: [body.url],
                 extractText: false,
@@ -415,6 +442,8 @@ const server = createServer(async (req, res) => {
                 json(res, 400, { error: 'Missing required field: sitemapUrl (string)' });
                 return;
             }
+            const sitemapBlk = blockedUrl(body.sitemapUrl);
+            if (sitemapBlk) { json(res, 400, { error: sitemapBlk, code: 'ssrf-blocked' }); return; }
             if (body.listOnly) {
                 const urls = await parseSitemap(body.sitemapUrl);
                 json(res, 200, { sitemapUrl: body.sitemapUrl, urlCount: urls.length, urls });
@@ -435,6 +464,8 @@ const server = createServer(async (req, res) => {
                 json(res, 400, { error: 'Missing required field: urls (string array)' });
                 return;
             }
+            const diagnoseBlk = blockedUrl(body.urls);
+            if (diagnoseBlk) { json(res, 400, { error: diagnoseBlk, code: 'ssrf-blocked' }); return; }
             const contract = getExtractionContract(body.contractName || 'real-estate-listing');
             const result = await crawl({
                 urls: body.urls,
@@ -487,6 +518,11 @@ const server = createServer(async (req, res) => {
                 json(res, 400, { error: 'Missing required field: urls (string array)' });
                 return;
             }
+            const ecUrlBlk = blockedUrl(body.urls);
+            if (ecUrlBlk) { json(res, 400, { error: ecUrlBlk, code: 'ssrf-blocked' }); return; }
+            const ecLlmUserSupplied = typeof body.llmBaseUrl === 'string' && body.llmBaseUrl.length > 0;
+            const ecLlmBlk = ecLlmUserSupplied ? blockedUrl(body.llmBaseUrl) : null;
+            if (ecLlmBlk) { json(res, 400, { error: `Blocked llmBaseUrl — ${ecLlmBlk}`, code: 'ssrf-blocked' }); return; }
             const baseUrl = body.llmBaseUrl || DEFAULT_LLM_BASEURL;
             const model = body.llmModel || DEFAULT_LLM_MODEL;
             if (!baseUrl || !model) {
@@ -501,6 +537,7 @@ const server = createServer(async (req, res) => {
                 urls: body.urls,
                 jsonSchema: contract.schema,
                 prompt,
+                guardLlmUrl: ecLlmUserSupplied && !ALLOW_PRIVATE_HOSTS,
                 markdownCharLimit: body.markdownCharLimit ?? 30000,
                 crawlOptions: {
                     usePlaywright: body.usePlaywright ?? false,
@@ -542,6 +579,11 @@ const server = createServer(async (req, res) => {
                 json(res, 400, { error: 'extract requires either jsonSchema or prompt (or both)' });
                 return;
             }
+            const exUrlBlk = blockedUrl(body.urls);
+            if (exUrlBlk) { json(res, 400, { error: exUrlBlk, code: 'ssrf-blocked' }); return; }
+            const exLlmUserSupplied = typeof body.llmBaseUrl === 'string' && body.llmBaseUrl.length > 0;
+            const exLlmBlk = exLlmUserSupplied ? blockedUrl(body.llmBaseUrl) : null;
+            if (exLlmBlk) { json(res, 400, { error: `Blocked llmBaseUrl — ${exLlmBlk}`, code: 'ssrf-blocked' }); return; }
             const baseUrl = body.llmBaseUrl || DEFAULT_LLM_BASEURL;
             const model = body.llmModel || DEFAULT_LLM_MODEL;
             if (!baseUrl || !model) {
@@ -552,6 +594,7 @@ const server = createServer(async (req, res) => {
                 urls: body.urls,
                 jsonSchema: body.jsonSchema,
                 prompt: body.prompt,
+                guardLlmUrl: exLlmUserSupplied && !ALLOW_PRIVATE_HOSTS,
                 markdownCharLimit: body.markdownCharLimit ?? 30000,
                 crawlOptions: {
                     usePlaywright: body.usePlaywright ?? false,

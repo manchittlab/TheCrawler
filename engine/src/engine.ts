@@ -153,15 +153,59 @@ export async function parseSitemap(sitemapUrl: string): Promise<string[]> {
 }
 
 // --- PDF ---
+/**
+ * Best-effort text recovery for PDFs that pdf-parse can't open (malformed,
+ * truncated, or minimal/“dummy” files that throw "Invalid PDF structure").
+ * Pulls text from uncompressed content streams: parenthesized string literals
+ * inside BT/ET text blocks, plus hex strings. Not a full PDF renderer — it
+ * recovers readable text where pdf-parse hard-fails, instead of crashing.
+ * Returns '' if nothing legible is found (caller then emits a graceful error).
+ */
+export function recoverPdfTextLenient(buffer: Buffer): string {
+    const raw = buffer.toString('latin1');
+    const out: string[] = [];
+    // 1. Parenthesized strings in text-show operators: (text) Tj  /  [(a)(b)] TJ
+    const reParen = /\(((?:\\.|[^\\()])*)\)\s*(?:T[jJ]|')/g;
+    let m: RegExpExecArray | null;
+    while ((m = reParen.exec(raw)) !== null) {
+        const s = m[1]
+            .replace(/\\([()\\])/g, '$1')
+            .replace(/\\n/g, '\n').replace(/\\r/g, '\r').replace(/\\t/g, '\t')
+            .replace(/\\(\d{1,3})/g, (_x, o) => String.fromCharCode(parseInt(o, 8) & 0xff));
+        if (s.trim()) out.push(s);
+    }
+    // 2. Fallback: array-show strings not caught above.
+    if (out.length === 0) {
+        const reArr = /\[((?:\([^)]*\)\s*-?\d*\s*)+)\]\s*TJ/g;
+        while ((m = reArr.exec(raw)) !== null) {
+            const parts = [...m[1].matchAll(/\(((?:\\.|[^\\()])*)\)/g)].map((p) => p[1]);
+            if (parts.length) out.push(parts.join(''));
+        }
+    }
+    return out.join(' ').replace(/[ \t]+/g, ' ').replace(/\s*\n\s*/g, '\n').trim();
+}
+
 async function extractPdf(url: string) {
     const require2 = createRequire(import.meta.url);
     const pdfParse = require2('pdf-parse');
     const res = await fetch(url, { headers: { 'User-Agent': pickUserAgent() } });
     const buffer = Buffer.from(await res.arrayBuffer());
-    const data = await pdfParse(buffer);
-    const metadata: Record<string, string> = {};
-    if (data.info) { for (const [k, v] of Object.entries(data.info)) { if (typeof v === 'string') metadata[k] = v; } }
-    return { text: (data.text || '').slice(0, 100000), pages: data.numpages || 0, metadata };
+    try {
+        const data = await pdfParse(buffer);
+        const metadata: Record<string, string> = {};
+        if (data.info) { for (const [k, v] of Object.entries(data.info)) { if (typeof v === 'string') metadata[k] = v; } }
+        const text = (data.text || '').trim();
+        // pdf-parse can "succeed" on a broken file but yield nothing — fall back.
+        if (text.length > 0) return { text: text.slice(0, 100000), pages: data.numpages || 0, metadata, parser: 'pdf-parse' };
+        const recovered = recoverPdfTextLenient(buffer);
+        if (recovered) return { text: recovered.slice(0, 100000), pages: data.numpages || 0, metadata, parser: 'lenient-fallback' };
+        return { text: '', pages: data.numpages || 0, metadata, parser: 'pdf-parse' };
+    } catch (err: any) {
+        // Malformed PDF: pdf-parse threw. Try lenient recovery before giving up.
+        const recovered = recoverPdfTextLenient(buffer);
+        if (recovered) return { text: recovered.slice(0, 100000), pages: 0, metadata: {}, parser: 'lenient-fallback' };
+        throw err; // genuinely unreadable — caller emits a graceful PDF error page
+    }
 }
 
 // --- DOCX ---

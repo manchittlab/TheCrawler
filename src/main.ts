@@ -24,6 +24,7 @@ interface ActorInput extends CrawlOptions {
     extractContract?: string;
     extractJsonSchema?: object;
     extractPrompt?: string;
+    groundToSource?: boolean;
     llmBaseUrl?: string;
     llmModel?: string;
     llmTemperature?: number | string;
@@ -157,6 +158,7 @@ try {
             prompt: contract
                 ? [contract.prompt, input.extractPrompt].filter(Boolean).join(' ')
                 : input.extractPrompt,
+            groundToSource: input.groundToSource === true,
             markdownCharLimit: input.llmMarkdownCharLimit ?? 30000,
             crawlOptions: {
                 usePlaywright: input.usePlaywright ?? false,

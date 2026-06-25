@@ -328,6 +328,12 @@
             "description": "Natural-language extraction instruction (e.g., 'Extract the product name, price, currency, availability'). Used alongside or instead of the JSON schema.",
             "editor": "textarea"
         },
+        "groundToSource": {
+            "title": "Extract: Ground To Source (anti-hallucination)",
+            "type": "boolean",
+            "description": "When true, every extracted leaf value is verified against the page text the model actually saw; any value that can't be traced to the page is set to null and listed in nulledFields. Catches invented values. Default false.",
+            "default": false
+        },
         "llmBaseUrl": {
             "title": "LLM Endpoint URL",
             "type": "string",
