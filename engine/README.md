@@ -1,16 +1,17 @@
 # TheCrawler
 
-Web scraper + validated extraction contracts for AI agents. PDF/DOCX, markdown, JSON-LD/microdata/commerce/forms/analytics-detection, no-LLM readiness diagnostics, structured errors, UA rotation, retry/timeout, optional in-memory cache. Adaptive Cheerio→Playwright. Open source, AGPL-3.0.
+Web scraper + validated extraction contracts for AI agents. PDF/DOCX, markdown, JSON-LD/microdata/commerce/forms/analytics detection, no-LLM readiness diagnostics, structured errors, standard User-Agent compatibility, retry/timeout, optional in-memory cache. Adaptive Cheerio→Playwright. Open source, AGPL-3.0.
 
 ## Install
 
-Current validated-contract and MCP changes should be installed from this GitHub source until the next npm publish lands:
+Current validated-contract, MCP, and REST API features should be installed from this GitHub source until the next npm publish lands:
 
 ```bash
 git clone https://github.com/manchittlab/TheCrawler.git
 cd TheCrawler/engine
 npm install
 npm run build
+node dist/cli.js --version  # expect 0.3.3 for this source build
 ```
 
 The published npm package exists, but may lag this source build:
@@ -22,7 +23,7 @@ npm install thecrawler
 Or from a local checkout:
 
 ```bash
-npm install file:/path/to/the-crawler-standalone
+npm install file:/path/to/TheCrawler/engine
 ```
 
 ## Library use
@@ -95,28 +96,31 @@ console.log(r[0].data);
 ## CLI
 
 ```bash
+# From this source checkout, use the local CLI until npm catches up.
+node dist/cli.js --version  # expect 0.3.3 for this source build
+
 # Crawl
-thecrawler crawl https://example.com --markdown
-thecrawler crawl https://example.com --retries 5 --timeout 60 --cache
+node dist/cli.js crawl https://example.com --markdown
+node dist/cli.js crawl https://example.com --retries 5 --timeout 60 --cache
 
 # Search Google + scrape top results
-thecrawler search "your query" --markdown
+node dist/cli.js search "your query" --markdown
 
 # Sitemap-driven crawl
-thecrawler sitemap https://example.com/sitemap.xml --markdown
+node dist/cli.js sitemap https://example.com/sitemap.xml --markdown
 
 # Markdown shortcut
-thecrawler md https://example.com
+node dist/cli.js md https://example.com
 
 # Built-in extraction contract with validation evidence
-thecrawler extract https://example.com/listing \
+node dist/cli.js extract https://example.com/listing \
   --contract real-estate-listing \
   --llm-base-url http://localhost:1234/v1/chat/completions \
   --llm-model local-model \
   --evidence-output real-estate-evidence.json
 
 # No-LLM contract readiness diagnostic
-thecrawler diagnose https://example.com/listing-1 https://example.com/listing-2 \
+node dist/cli.js diagnose https://example.com/listing-1 https://example.com/listing-2 \
   --contract real-estate-listing \
   --output real-estate-workflow-diagnostic.json \
   --report real-estate-workflow-report.md
@@ -126,9 +130,9 @@ thecrawler diagnose https://example.com/listing-1 https://example.com/listing-2 
 
 Contracts turn a crawl into a repeatable, validated output shape for agent workflows. Current built-in contracts are `real-estate-listing`, which extracts normalized property listing fields, and `product-page`, which extracts normalized product catalog fields such as name, price, availability, brand, SKU, rating, source URL, confidence, and evidence notes.
 
-Use `thecrawler extract --list-contracts` to list available contracts. Contract mode returns the normal `ExtractResult` plus a `validation` object with `valid`, `requiredFields`, and `missingRequiredFields`, so an agent can branch on extraction quality instead of trusting loose markdown.
+Use `node dist/cli.js extract --list-contracts` to list available contracts from a current source checkout. Contract mode returns the normal `ExtractResult` plus a `validation` object with `valid`, `requiredFields`, and `missingRequiredFields`, so an agent can branch on extraction quality instead of trusting loose markdown.
 
-Use `thecrawler diagnose <url...> --contract real-estate-listing` or `--contract product-page` before LLM extraction to score whether a source or workflow is ready for contract extraction. The diagnostic does not call an LLM; it crawls each page, checks source signals, and returns per-URL `verdict`, `readyForExtraction`, `score`, `blockers`, `warnings`, `recommendedNextStep`, and signal evidence plus an aggregate workflow summary (`readyUrls`, `blockedUrls`, `workflowVerdict`, `blockersByType`, `recommendedNextStep`). Add `--report report.md` to produce a buyer-readable Markdown report with missing readiness signals, without raw extracted contact details or page evidence.
+Use `node dist/cli.js diagnose <url...> --contract real-estate-listing` or `--contract product-page` before LLM extraction to score whether a source or workflow is ready for contract extraction. The diagnostic does not call an LLM; it crawls each page, checks source signals, and returns per-URL `verdict`, `readyForExtraction`, `score`, `blockers`, `warnings`, `recommendedNextStep`, and signal evidence plus an aggregate workflow summary (`readyUrls`, `blockedUrls`, `workflowVerdict`, `blockersByType`, `recommendedNextStep`). Add `--report report.md` to produce a buyer-readable Markdown report with missing readiness signals, without raw extracted contact details or page evidence.
 
 ## MCP server
 
@@ -141,7 +145,7 @@ Add to your MCP client config (Claude Code / Cursor / Windsurf):
     "mcpServers": {
         "thecrawler": {
             "command": "node",
-            "args": ["/path/to/the-crawler-standalone/dist/mcp.js"],
+            "args": ["/path/to/TheCrawler/engine/dist/mcp.js"],
             "env": {
                 "THECRAWLER_LLM_BASEURL": "http://your-llm-host:8080/v1/chat/completions",
                 "THECRAWLER_LLM_MODEL": "your-model-name"
@@ -169,7 +173,7 @@ The env vars set defaults for `extract_structured` and `extract_extraction_contr
 ## REST API server
 
 ```bash
-THECRAWLER_API_KEY=local_test_key thecrawler-api --port 3000
+THECRAWLER_API_KEY=local_test_key node dist/server.js --port 3000
 ```
 
 Endpoints:
@@ -217,7 +221,7 @@ curl -X POST http://localhost:3000/v1/extract-contract \
 
 ## What it extracts (out of the box, no extra code)
 
-Per page: title, description, language, canonical URL, robots directives, full text (50K cap), markdown (boilerplate-stripped, GFM), heading-aware chunks, headings (h1-h6), links (with internal/external + rel), images (with lazy-load src), meta tags (incl. OG + Twitter Card), tables, JSON-LD, microdata (itemscope/itemprop), commerce data (price/currency/SKU/rating from JSON-LD Product), forms (action/method/fields), 16 analytics trackers detected (GA4, GTM, Facebook Pixel, Hotjar, Segment, Mixpanel, Amplitude, Heap, Plausible, Matomo, Clarity, LinkedIn, Twitter, Pinterest, TikTok, etc.), emails, phones, social links, hreflang tags, pagination links, redirect chain, response timing, page size.
+Per page: title, description, language, canonical URL, robots directives, full text (50K cap), markdown (boilerplate-stripped, GFM), heading-aware chunks, headings (h1-h6), links (with internal/external + rel), images (with lazy-load src), meta tags (incl. OG + Twitter Card), tables, JSON-LD, microdata (itemscope/itemprop), commerce data (price/currency/SKU/rating from JSON-LD Product), forms (action/method/fields), 16 analytics trackers detected (GA4, GTM, Facebook Pixel, Hotjar, Segment, Mixpanel, Amplitude, Heap, Plausible, Matomo, Clarity, LinkedIn, Twitter, Pinterest, TikTok, etc.), optional email-like and phone-like public text fields, social links, hreflang tags, pagination links, redirect chain, response timing, page size.
 
 PDF and DOCX URLs are auto-detected and parsed (text + metadata for PDFs; text + markdown for DOCX).
 
@@ -225,11 +229,11 @@ PDF and DOCX URLs are auto-detected and parsed (text + metadata for PDFs; text +
 
 Default Cheerio (fast HTTP+parse) — set `usePlaywright: true` for full JS rendering, or `adaptiveCrawling: true` to try Cheerio first and auto-fall-back to Playwright when an SPA shell is detected (text < 200 chars or known SPA root div).
 
-## Anti-bot resilience
+## Blocked/challenge handling
 
-User-Agent rotation from a real-browser pool (Chrome/Firefox/Safari, randomized per request). Anti-bot challenge page detection: when a 200 response carries a Cloudflare/WAF challenge body ("checking your browser", "attention required", "cloudflare ray id"), the page is marked `errorType: 'blocked-bot'` rather than silently returning the challenge HTML.
+Optional User-Agent rotation uses standard browser User-Agent strings for compatibility; it does not override access controls. Challenge-page detection: when a 200 response carries an access-control or challenge body ("checking your browser", "attention required", "cloudflare ray id"), the page is marked `errorType: 'blocked-bot'` rather than silently returning challenge HTML.
 
-For harder targets, supply `proxyUrl` (any Crawlee-compatible HTTP(S) proxy URL).
+If your workflow legitimately uses a proxy, supply `proxyUrl` (any Crawlee-compatible HTTP(S) proxy URL).
 
 ## License
 
