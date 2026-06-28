@@ -295,11 +295,11 @@
         "extractContract": {
             "title": "Extraction Contract",
             "type": "string",
-            "description": "Built-in contract name for diagnostic or extract mode. Current options: real-estate-listing, product-page, and docs-page. In extractMode this supplies the schema and validation rules; in diagnoseMode it supplies the readiness signals.",
+            "description": "Built-in contract name for diagnostic or extract mode. Options: real-estate-listing, product-page, docs-page, brand-context. In extractMode this supplies the schema and validation rules; in diagnoseMode it supplies the readiness signals.",
             "default": "real-estate-listing",
             "editor": "select",
-            "enum": ["real-estate-listing", "product-page", "docs-page"],
-            "enumTitles": ["Real Estate Listing", "Product Page", "Docs Page"]
+            "enum": ["real-estate-listing", "product-page", "docs-page", "brand-context"],
+            "enumTitles": ["Real Estate Listing", "Product Page", "Docs Page", "Brand Context"]
         },
         "diagnosticReport": {
             "title": "Save Diagnostic Report",
