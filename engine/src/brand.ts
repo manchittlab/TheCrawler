@@ -352,8 +352,15 @@ export function buildPalette(hits: ColorHit[], themeColorRaw: string | null): { 
         weight: Number(e.weight.toFixed(3)),
     }));
     if (palette.length) {
-        // primary = theme-color if present in the palette, else the top-ranked color.
-        let primaryIdx = themeColor ? palette.findIndex((p) => p.hex === themeColor) : 0;
+        // Primary by INTENT, not raw chroma — a bright marketing accent (e.g. a cyan
+        // badge) must not out-rank the real brand color (e.g. a deep indigo). Priority:
+        //   1) theme-color  — an explicit brand declaration
+        //   2) a --brand / --primary CSS custom property — named brand intent
+        //   3) the top-ranked color (saturation × weight) — fallback when no signal
+        // Only an EXPLICIT signal overrides the top-ranked pick, so sites that already
+        // resolved correctly (theme-color/top-ranked) are unaffected.
+        let primaryIdx = themeColor ? palette.findIndex((p) => p.hex === themeColor) : -1;
+        if (primaryIdx < 0) primaryIdx = palette.findIndex((p) => /:var--(brand|primary)/i.test(p.source));
         if (primaryIdx < 0) primaryIdx = 0;
         palette[primaryIdx].role = 'primary';
         // background = darkest remaining; accent = most saturated remaining.
@@ -440,6 +447,167 @@ export function rankLogosByQuality(cands: LogoEntry[], probes: Map<string, LogoP
         .slice(0, 4)
         // Preserve source `confidence`; expose the combined ranking value as `score`.
         .map((x) => ({ ...x.c, score: Number(x.score.toFixed(3)) }));
+}
+
+// --- JSON-LD Organization prior (deterministic brand facts) ---
+
+export interface BrandOrg {
+    name: string | null;
+    description: string | null;
+    logo: string | null;
+    socialLinks: string[];
+}
+
+// Known social hosts for sameAs → socialLinks (registrable host, www-stripped).
+const ORG_SOCIAL_HOSTS = new Set([
+    'twitter.com', 'x.com', 'linkedin.com', 'facebook.com', 'instagram.com',
+    'youtube.com', 'youtu.be', 'github.com', 'tiktok.com', 'threads.net', 'bsky.app',
+]);
+
+/**
+ * Deterministic brand profile from Organization/WebSite/Brand JSON-LD: name,
+ * description, logo, and sameAs social links. A reliable PRIOR/validation for the
+ * LLM brand-context contract (the model can hallucinate a name; schema.org can't).
+ * Flattens `@graph`, prefers an Organization/Brand node, falls back to WebSite.
+ * Returns null when no org-like node yields any field. Pure + deterministic.
+ */
+export function extractOrgFromJsonLd(structuredData: unknown[]): BrandOrg | null {
+    if (!Array.isArray(structuredData) || structuredData.length === 0) return null;
+    const nodes: Record<string, unknown>[] = [];
+    const visit = (v: unknown, d: number) => {
+        if (!v || typeof v !== 'object' || d > 6) return;
+        if (Array.isArray(v)) { for (const x of v) visit(x, d + 1); return; }
+        const o = v as Record<string, unknown>;
+        nodes.push(o);
+        if (Array.isArray(o['@graph'])) for (const g of o['@graph']) visit(g, d + 1);
+    };
+    for (const s of structuredData) visit(s, 0);
+
+    const typeOf = (n: Record<string, unknown>): string[] => {
+        const t = n['@type'];
+        return Array.isArray(t) ? t.map(String) : (t ? [String(t)] : []);
+    };
+    const isOrg = (n: Record<string, unknown>) => typeOf(n).some((t) => /(?:^|.)Organization$|^(Corporation|LocalBusiness|NGO|Brand)$/i.test(t));
+    const isWebSite = (n: Record<string, unknown>) => typeOf(n).some((t) => /^WebSite$/i.test(t));
+    const org = nodes.find(isOrg) || nodes.find(isWebSite);
+    if (!org) return null;
+
+    const str = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v.trim() : null);
+    const name = str(org.name) || str(org.alternateName) || str(org.legalName);
+    const description = str(org.description) || str(org.disambiguatingDescription);
+
+    let logo: string | null = null;
+    const lg = (org.logo ?? org.image) as unknown;
+    if (typeof lg === 'string') logo = str(lg);
+    else if (Array.isArray(lg)) { const f = lg[0]; logo = typeof f === 'string' ? str(f) : str((f as Record<string, unknown>)?.url) || str((f as Record<string, unknown>)?.contentUrl); }
+    else if (lg && typeof lg === 'object') logo = str((lg as Record<string, unknown>).url) || str((lg as Record<string, unknown>).contentUrl);
+
+    const socials = new Set<string>();
+    const sa = org.sameAs;
+    const arr = Array.isArray(sa) ? sa : (typeof sa === 'string' ? [sa] : []);
+    for (const u of arr) {
+        if (typeof u !== 'string') continue;
+        try { const h = new URL(u).hostname.toLowerCase().replace(/^www\./, ''); if (ORG_SOCIAL_HOSTS.has(h)) socials.add(u); } catch { /* skip bad url */ }
+    }
+
+    if (!name && !description && !logo && socials.size === 0) return null;
+    return { name, description, logo, socialLinks: [...socials] };
+}
+
+// --- L4: logo pixel-color (dominant brand color from the logo image) ---
+
+/**
+ * Dominant chromatic color from decoded RGBA pixels (deterministic fixed-bin
+ * counting): bins each pixel to 5 bits/channel, skips (semi-)transparent and
+ * near-neutral pixels, returns the average hex of the most-populated bin (ties by
+ * lowest bin key). Pure — the caller decodes the image and passes raw pixels.
+ * Returns null when no chromatic pixel is found (e.g. a black/white wordmark).
+ */
+export function quantizeDominantColor(
+    data: Uint8Array | Uint8ClampedArray | number[],
+    opts: { channels?: number; alphaThreshold?: number } = {},
+): string | null {
+    const ch = opts.channels ?? 4;
+    const aMin = opts.alphaThreshold ?? 200;
+    const counts = new Map<number, { count: number; r: number; g: number; b: number }>();
+    for (let i = 0; i + ch - 1 < data.length; i += ch) {
+        const r = data[i], g = data[i + 1], b = data[i + 2];
+        const a = ch >= 4 ? data[i + 3] : 255;
+        if (a < aMin) continue;                       // skip (semi-)transparent
+        if (isNeutral(rgbToHsl({ r, g, b, a: 1 }))) continue; // skip white/black/gray
+        const key = ((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3);
+        const e = counts.get(key);
+        if (e) { e.count++; e.r += r; e.g += g; e.b += b; }
+        else counts.set(key, { count: 1, r, g, b });
+    }
+    if (counts.size === 0) return null;
+    let best: { count: number; r: number; g: number; b: number } | null = null;
+    let bestKey = Number.MAX_SAFE_INTEGER;
+    for (const [k, v] of counts) {
+        if (!best || v.count > best.count || (v.count === best.count && k < bestKey)) { best = v; bestKey = k; }
+    }
+    if (!best) return null;
+    return toHex({ r: Math.round(best.r / best.count), g: Math.round(best.g / best.count), b: Math.round(best.b / best.count), a: 1 });
+}
+
+const SVG_COLOR_RE = /(?:fill|stop-color|stroke|color)\s*[:=]\s*["']?(#[0-9a-fA-F]{3,8}|rgba?\([^)]{0,80}\)|hsla?\([^)]{0,80}\))/gi;
+
+/**
+ * Dominant chromatic color from raw SVG markup (deterministic): counts fill/
+ * stop-color/stroke/color values, skips neutrals, returns the most-frequent hex
+ * (ties by hex ascending). Best-effort — class-based SVG coloring is not resolved.
+ */
+export function dominantColorFromSvgMarkup(svg: string): string | null {
+    if (!svg) return null;
+    SVG_COLOR_RE.lastIndex = 0;
+    const counts = new Map<string, number>();
+    let m: RegExpExecArray | null;
+    while ((m = SVG_COLOR_RE.exec(svg)) !== null) {
+        const hex = normalizeColor(m[1]);
+        if (!hex) continue;
+        const rgba = parseColor(hex);
+        if (!rgba || isNeutral(rgbToHsl(rgba))) continue;
+        counts.set(hex, (counts.get(hex) || 0) + 1);
+    }
+    if (counts.size === 0) return null;
+    let best: string | null = null, bestN = -1;
+    for (const [hex, n] of [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+        if (n > bestN) { best = hex; bestN = n; }
+    }
+    return best;
+}
+
+/** Circular hue distance (0..180°) between two colors, or null if unparseable. */
+function hueDistance(a: string, b: string): number | null {
+    const ca = parseColor(a), cb = parseColor(b);
+    if (!ca || !cb) return null;
+    const d = Math.abs(rgbToHsl(ca).h - rgbToHsl(cb).h) % 360;
+    return d > 180 ? 360 - d : d;
+}
+
+/**
+ * Fold the logo's dominant color into a built palette — the logo is ground truth for
+ * the brand hue, so it arbitrates `primary` when CSS signals are ambiguous (the
+ * undeclared-brand case C1 can't catch, e.g. a bright UI accent out-ranking the real
+ * brand). If a palette color is within HUE_TOL° of the logo color, promote it to
+ * primary; otherwise inject the logo color as primary. Deterministic; returns a new
+ * palette (caps at 6). No-op on a null/neutral logo color.
+ */
+export function foldLogoColorIntoPalette(palette: PaletteEntry[], logoColor: string | null): PaletteEntry[] {
+    if (!logoColor) return palette;
+    const lc = normalizeColor(logoColor);
+    if (!lc) return palette;
+    const HUE_TOL = 20;
+    const out = palette.map((p) => ({ ...p }));
+    let matchIdx = -1;
+    for (let i = 0; i < out.length; i++) {
+        const d = hueDistance(out[i].hex, lc);
+        if (d !== null && d <= HUE_TOL) { matchIdx = i; break; }
+    }
+    for (const p of out) if (p.role === 'primary') p.role = null; // clear old primary
+    if (matchIdx >= 0) { out[matchIdx].role = 'primary'; return out; }
+    out.unshift({ hex: lc, role: 'primary', source: 'logo-pixel', weight: 0 });
+    return out.slice(0, 6);
 }
 
 // --- SSRF guards (used before fetching linked stylesheets / brand assets) ---

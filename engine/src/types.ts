@@ -205,6 +205,12 @@ export interface PageData {
      * Absolute URLs; SVG/transparent-PNG preferred.
      */
     logo: { url: string; source: string; type: string | null; confidence: number }[];
+    /**
+     * Deterministic brand facts from Organization/WebSite/Brand JSON-LD (name,
+     * description, logo, social links). Populated when extractBrand is on; a reliable
+     * prior/validation for the LLM brand-context contract. Null when no org JSON-LD.
+     */
+    brandOrg: { name: string | null; description: string | null; logo: string | null; socialLinks: string[] } | null;
     /** Processed/cleaned HTML (main content when onlyMainContent). Populated when extractHtml. */
     html: string | null;
     /** Raw, unprocessed serialized HTML. Populated when extractRawHtml. */

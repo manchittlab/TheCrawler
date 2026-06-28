@@ -24,9 +24,12 @@ import type { CrawlOptions, PageData, CrawlResult, BrowserAction, CrawlErrorType
 import { CrawlCache, getDefaultCache } from './cache.js';
 import {
     buildPalette, rankLogosByQuality, collectCssColors, normalizeColor, sanitizeInlineSvg,
-    isBlockedBrandHost, sameSite, type ColorHit, type LogoEntry, type LogoProbe,
+    isBlockedBrandHost, sameSite, extractOrgFromJsonLd,
+    quantizeDominantColor, dominantColorFromSvgMarkup, foldLogoColorIntoPalette,
+    type ColorHit, type LogoEntry, type LogoProbe,
 } from './brand.js';
 import { safeFetch } from './ssrf.js';
+import { PNG } from 'pngjs';
 
 // Re-export types for consumers
 export type { CrawlOptions, PageData, CrawlResult, BrowserAction, CrawlErrorType } from './types.js';
@@ -48,6 +51,19 @@ const USER_AGENT_POOL = [
 ];
 function pickUserAgent(): string {
     return USER_AGENT_POOL[Math.floor(Math.random() * USER_AGENT_POOL.length)];
+}
+
+// SSRF guard for engine-internal fetches of UNTRUSTED, content-derived URLs
+// (sitemap children, document downloads) that bypass the request-boundary check —
+// a malicious sitemap can list http://169.254.169.254/… as a child. Default-protected
+// via safeFetch (DNS-resolve + private-IP reject + manual redirect re-validation).
+// The engine LIBRARY stays permissive when THECRAWLER_ALLOW_PRIVATE_HOSTS=1 (matches
+// server.ts; lets 127.0.0.1 test fixtures + operator self-hosting through) — Lesson 22:
+// enforce at the untrusted boundary, don't break the permissive library.
+const ALLOW_PRIVATE_HOSTS = process.env.THECRAWLER_ALLOW_PRIVATE_HOSTS === '1';
+async function guardedFetch(url: string, init: { method?: string; headers?: Record<string, string>; body?: string; signal?: AbortSignal } = {}): Promise<Response> {
+    if (ALLOW_PRIVATE_HOSTS) return fetch(url, init as RequestInit);
+    return safeFetch(url, init);
 }
 
 // --- Error classification ---
@@ -128,7 +144,7 @@ async function searchGoogle(query: string, limit: number, serpApiKey?: string, l
 
 // --- Sitemap ---
 export async function parseSitemap(sitemapUrl: string): Promise<string[]> {
-    const res = await fetch(sitemapUrl, { headers: { 'User-Agent': pickUserAgent() } });
+    const res = await guardedFetch(sitemapUrl, { headers: { 'User-Agent': pickUserAgent() } });
     const xml = await res.text();
     const urls: string[] = [];
     const locRegex = /<loc>\s*(https?:\/\/[^<]+)\s*<\/loc>/gi;
@@ -140,7 +156,7 @@ export async function parseSitemap(sitemapUrl: string): Promise<string[]> {
         for (const childUrl of urls) {
             if (childUrl.endsWith('.xml') || childUrl.includes('sitemap')) {
                 try {
-                    const childRes = await fetch(childUrl, { headers: { 'User-Agent': pickUserAgent() } });
+                    const childRes = await guardedFetch(childUrl, { headers: { 'User-Agent': pickUserAgent() } });
                     const childXml = await childRes.text();
                     const childLocRegex = /<loc>\s*(https?:\/\/[^<]+)\s*<\/loc>/gi;
                     let cm;
@@ -189,7 +205,7 @@ export function recoverPdfTextLenient(buffer: Buffer): string {
 async function extractPdf(url: string) {
     const require2 = createRequire(import.meta.url);
     const pdfParse = require2('pdf-parse');
-    const res = await fetch(url, { headers: { 'User-Agent': pickUserAgent() } });
+    const res = await guardedFetch(url, { headers: { 'User-Agent': pickUserAgent() } });
     const buffer = Buffer.from(await res.arrayBuffer());
     try {
         const data = await pdfParse(buffer);
@@ -213,7 +229,7 @@ async function extractPdf(url: string) {
 async function extractDocx(url: string) {
     const require2 = createRequire(import.meta.url);
     const mammoth = require2('mammoth');
-    const res = await fetch(url, { headers: { 'User-Agent': pickUserAgent() } });
+    const res = await guardedFetch(url, { headers: { 'User-Agent': pickUserAgent() } });
     const buffer = Buffer.from(await res.arrayBuffer());
     const [textResult, mdResult] = await Promise.all([mammoth.extractRawText({ buffer }), mammoth.convertToMarkdown({ buffer })]);
     return { text: (textResult.value || '').slice(0, 100000), markdown: (mdResult.value || '').slice(0, 100000) };
@@ -261,7 +277,7 @@ function emptyPage(url: string, overrides: Partial<PageData> = {}): PageData {
         statusCode: 0, contentType: null, responseTimeMs: null, pageSizeBytes: null,
         responseHeaders: {}, scrapedAt: new Date().toISOString(), status: 'error', error: null,
         errorType: null, errorRetryable: false, fromCache: false,
-        engine: 'cheerio', usedPlaywright: false, themeColor: null, palette: [], logo: [],
+        engine: 'cheerio', usedPlaywright: false, themeColor: null, palette: [], logo: [], brandOrg: null,
         html: null, rawHtml: null,
         ...overrides,
     };
@@ -457,6 +473,44 @@ async function fetchManifest(manifestUrl: string): Promise<{ icons: LogoEntry[];
             bgColorRaw: typeof m?.background_color === 'string' ? m.background_color : null,
         };
     } finally { clearTimeout(t); }
+}
+
+const LOGO_COLOR_MAX_BYTES = 2_000_000;
+
+/**
+ * L4: derive the logo's dominant brand color. Tries the top-ranked logo candidates
+ * (bounded): inline/remote SVG → parse fill colors; PNG → pngjs-decode + quantize
+ * (zero-native, deterministic). Other raster formats are skipped (no decoder).
+ * SSRF-guarded fetch, size-capped. Returns a hex or null. Never throws.
+ */
+async function deriveLogoColor(logos: LogoEntry[], _pageUrl: string): Promise<string | null> {
+    for (const cand of logos.slice(0, 3)) {
+        try {
+            if (cand.url.startsWith('data:image/svg')) {
+                const svg = decodeURIComponent(cand.url.replace(/^data:image\/svg\+xml[^,]*,/i, ''));
+                const c = dominantColorFromSvgMarkup(svg);
+                if (c) return c;
+                continue;
+            }
+            if (cand.url.startsWith('data:')) continue; // non-svg data URI — no decoder
+            if (cand.type === 'svg') {
+                const r = await guardedFetch(cand.url, { headers: { 'User-Agent': USER_AGENT_POOL[0] } });
+                if (!r.ok) continue;
+                const c = dominantColorFromSvgMarkup(await r.text());
+                if (c) return c;
+                continue;
+            }
+            if (cand.type && cand.type !== 'png') continue; // only PNG is decoded (pngjs)
+            const r = await guardedFetch(cand.url, { headers: { 'User-Agent': USER_AGENT_POOL[0] } });
+            if (!r.ok) continue;
+            const ab = await r.arrayBuffer();
+            if (ab.byteLength === 0 || ab.byteLength > LOGO_COLOR_MAX_BYTES) continue;
+            const png = PNG.sync.read(Buffer.from(ab));
+            const c = quantizeDominantColor(png.data, { channels: 4 });
+            if (c) return c;
+        } catch { /* try next candidate */ }
+    }
+    return null;
 }
 
 /** Sample rendered brand colors from a live Playwright page (computed styles). */
@@ -916,6 +970,13 @@ export async function crawlStream(
             data.palette = palette;
             const domCands = extractLogoCandidates($, pageUrl, data.structuredData);
             data.logo = await probeAndRankLogos([...domCands, ...manifestIcons]);
+            // Deterministic Organization JSON-LD prior (name/description/logo/socials) —
+            // a reliable cross-check for the LLM brand-context contract.
+            data.brandOrg = extractOrgFromJsonLd(data.structuredData);
+            // L4: the logo's dominant color arbitrates `primary` when CSS signals are
+            // ambiguous (logo = ground truth for the brand hue).
+            const logoColor = await deriveLogoColor(data.logo, pageUrl);
+            if (logoColor) data.palette = foldLogoColorIntoPalette(data.palette, logoColor);
         }
 
         data.responseTimeMs = Date.now() - startTime;
