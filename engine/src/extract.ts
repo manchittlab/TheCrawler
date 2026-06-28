@@ -11,6 +11,9 @@
 import { crawl } from './engine.js';
 import { safeFetch } from './ssrf.js';
 import type { CrawlOptions, CrawlErrorType } from './types.js';
+import TurndownService from 'turndown';
+// @ts-ignore — no types available
+import { gfm } from 'turndown-plugin-gfm';
 
 export interface LlmConfig {
     /**
@@ -31,8 +34,8 @@ export interface LlmConfig {
 }
 
 export interface ExtractOptions {
-    /** URL(s) to extract from. Each becomes one LLM call. */
-    urls: string[];
+    /** URL(s) to extract from. Each becomes one LLM call. Optional when `html`/`markdown` is supplied. */
+    urls?: string[];
     /**
      * JSON Schema describing the desired output shape. The LLM is instructed to
      * return ONLY JSON matching this schema. Either `jsonSchema` or `prompt` (or
@@ -76,6 +79,15 @@ export interface ExtractOptions {
      * the hosted route) sets this true only for caller-supplied `llmBaseUrl`.
      */
     guardLlmUrl?: boolean;
+    /**
+     * Provide page content DIRECTLY to skip the crawl (G2). If `markdown` is given it is
+     * used as-is; if `html` is given it is converted to markdown (Turndown, same config as
+     * the crawler). When either is set, `urls` is optional and only `urls[0]` (if present)
+     * is used as a label; grounding validates against the provided text. Exactly one
+     * extraction is produced from the provided content.
+     */
+    html?: string;
+    markdown?: string;
 }
 
 export type ExtractErrorType =
@@ -336,6 +348,95 @@ function classifyLlmError(err: any): ExtractErrorType {
     return 'llm-network';
 }
 
+/** Convert provided HTML → markdown with the SAME Turndown config the crawler uses. */
+function htmlToMarkdownStandalone(html: string): string {
+    const turndown = new TurndownService({ headingStyle: 'atx', codeBlockStyle: 'fenced', bulletListMarker: '-', emDelimiter: '*', strongDelimiter: '**' });
+    turndown.use(gfm);
+    turndown.addRule('removeEmptyLinks', { filter: (node) => node.nodeName === 'A' && !node.textContent?.trim(), replacement: () => '' });
+    return turndown.turndown(html).replace(/\n{3,}/g, '\n\n').trim();
+}
+
+/**
+ * Run one extraction against already-fetched markdown (LLM call → parse → optional
+ * grounding). Shared by the crawl path and the provided-content path so both apply
+ * IDENTICAL anti-hallucination logic. Never throws — returns an error ExtractResult.
+ */
+async function extractFromContent(
+    label: string,
+    fullMarkdown: string,
+    options: ExtractOptions,
+    systemMsg: string,
+    charLimit: number,
+    startTotal: number,
+    crawlMs: number | null,
+): Promise<ExtractResult> {
+    // Keep the exact text the model sees (post-truncation) so the grounding guard
+    // verifies against the SAME content — not text the model never read.
+    const sentMarkdown = fullMarkdown.length > charLimit ? fullMarkdown.slice(0, charLimit) : fullMarkdown;
+    const userMsg = buildUserMessage(label, fullMarkdown, charLimit);
+    const startLlm = Date.now();
+    let raw = '';
+    let promptTokens: number | null = null;
+    let completionTokens: number | null = null;
+    try {
+        const llmResp = await callLlm(options.llm, systemMsg, userMsg, options.jsonSchema, options.guardLlmUrl);
+        raw = llmResp.content;
+        promptTokens = llmResp.promptTokens;
+        completionTokens = llmResp.completionTokens;
+    } catch (err: any) {
+        return {
+            url: label, data: null, status: 'error',
+            error: err?.message || String(err), errorType: classifyLlmError(err),
+            rawResponse: null, promptTokens: null, completionTokens: null,
+            responseTimeMs: Date.now() - startTotal, crawlMs, llmMs: Date.now() - startLlm,
+        };
+    }
+    const llmMs = Date.now() - startLlm;
+
+    if (!raw.trim()) {
+        return {
+            url: label, data: null, status: 'error',
+            error: 'LLM returned empty response', errorType: 'llm-empty-response',
+            rawResponse: raw, promptTokens, completionTokens,
+            responseTimeMs: Date.now() - startTotal, crawlMs, llmMs,
+        };
+    }
+
+    // Parse the LLM's JSON response. Strip markdown fences defensively.
+    const cleaned = raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(cleaned);
+    } catch (err: any) {
+        return {
+            url: label, data: null, status: 'error',
+            error: `JSON parse failed: ${err.message}`, errorType: 'json-parse-error',
+            rawResponse: raw, promptTokens, completionTokens,
+            responseTimeMs: Date.now() - startTotal, crawlMs, llmMs,
+        };
+    }
+
+    let finalData = parsed;
+    const nulledFields: string[] = [];
+    if (options.groundToSource) {
+        try {
+            const srcIndex = buildSourceIndex(sentMarkdown);
+            finalData = groundData(parsed, srcIndex, '', nulledFields);
+        } catch {
+            // Grounding must never break extraction — fall back to ungrounded data.
+            finalData = parsed;
+            nulledFields.length = 0;
+        }
+    }
+
+    return {
+        url: label, data: finalData, status: 'success',
+        error: null, errorType: null, rawResponse: raw,
+        promptTokens, completionTokens, nulledFields,
+        responseTimeMs: Date.now() - startTotal, crawlMs, llmMs,
+    };
+}
+
 /**
  * Extract structured data from one or more URLs using an LLM.
  *
@@ -350,8 +451,10 @@ export async function extract(options: ExtractOptions): Promise<ExtractResult[]>
     if (!options.jsonSchema && !options.prompt) {
         throw new Error('extract() requires either jsonSchema or prompt (or both).');
     }
-    if (!options.urls?.length) {
-        throw new Error('extract() requires non-empty urls array.');
+    const hasProvided = (typeof options.markdown === 'string' && options.markdown.length > 0)
+        || (typeof options.html === 'string' && options.html.length > 0);
+    if (!hasProvided && !options.urls?.length) {
+        throw new Error('extract() requires a non-empty urls array, or html/markdown content.');
     }
     if (!options.llm?.baseUrl || !options.llm?.model) {
         throw new Error('extract() requires llm.baseUrl and llm.model.');
@@ -361,9 +464,31 @@ export async function extract(options: ExtractOptions): Promise<ExtractResult[]>
     const charLimit = options.markdownCharLimit ?? 30000;
     const results: ExtractResult[] = [];
 
+    // Provided-content path (G2): skip the crawl, extract directly from supplied text.
+    if (hasProvided) {
+        const startTotal = Date.now();
+        const label = options.urls?.[0] ?? 'provided-content';
+        const content = typeof options.markdown === 'string' && options.markdown.length > 0
+            ? options.markdown
+            : htmlToMarkdownStandalone(options.html as string);
+        // Whitespace/markup-only input → no extractable text (Codex catch). Don't waste an LLM call.
+        if (!content.trim()) {
+            results.push({
+                url: label, data: null, status: 'error',
+                error: 'provided html/markdown contained no extractable text',
+                errorType: 'no-page-content',
+                rawResponse: null, promptTokens: null, completionTokens: null,
+                responseTimeMs: Date.now() - startTotal, crawlMs: null, llmMs: null,
+            });
+            return results;
+        }
+        results.push(await extractFromContent(label, content, options, systemMsg, charLimit, startTotal, null));
+        return results;
+    }
+
     // Process URLs sequentially. Parallelizing would hammer the LLM and a slow
     // single model call already dominates total time per URL.
-    for (const url of options.urls) {
+    for (const url of options.urls ?? []) {
         const startTotal = Date.now();
         let crawlMs: number | null = null;
 
@@ -398,81 +523,8 @@ export async function extract(options: ExtractOptions): Promise<ExtractResult[]>
             continue;
         }
 
-        // 2. Call the LLM with the page markdown. Keep the exact text the model
-        //    sees (post-truncation) so the grounding guard verifies against the
-        //    SAME content — not text the model never read.
-        const sentMarkdown = page.markdown.length > charLimit
-            ? page.markdown.slice(0, charLimit)
-            : page.markdown;
-        const userMsg = buildUserMessage(page.url, page.markdown, charLimit);
-        const startLlm = Date.now();
-        let raw = '';
-        let promptTokens: number | null = null;
-        let completionTokens: number | null = null;
-        try {
-            const llmResp = await callLlm(options.llm, systemMsg, userMsg, options.jsonSchema, options.guardLlmUrl);
-            raw = llmResp.content;
-            promptTokens = llmResp.promptTokens;
-            completionTokens = llmResp.completionTokens;
-        } catch (err: any) {
-            results.push({
-                url: page.url, data: null, status: 'error',
-                error: err?.message || String(err),
-                errorType: classifyLlmError(err),
-                rawResponse: null, promptTokens: null, completionTokens: null,
-                responseTimeMs: Date.now() - startTotal, crawlMs, llmMs: Date.now() - startLlm,
-            });
-            continue;
-        }
-        const llmMs = Date.now() - startLlm;
-
-        if (!raw.trim()) {
-            results.push({
-                url: page.url, data: null, status: 'error',
-                error: 'LLM returned empty response',
-                errorType: 'llm-empty-response',
-                rawResponse: raw, promptTokens, completionTokens,
-                responseTimeMs: Date.now() - startTotal, crawlMs, llmMs,
-            });
-            continue;
-        }
-
-        // 3. Parse the LLM's JSON response. Some servers wrap JSON in markdown fences
-        // even with response_format set; strip those defensively.
-        const cleaned = raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
-        let parsed: unknown;
-        try {
-            parsed = JSON.parse(cleaned);
-        } catch (err: any) {
-            results.push({
-                url: page.url, data: null, status: 'error',
-                error: `JSON parse failed: ${err.message}`,
-                errorType: 'json-parse-error',
-                rawResponse: raw, promptTokens, completionTokens,
-                responseTimeMs: Date.now() - startTotal, crawlMs, llmMs,
-            });
-            continue;
-        }
-
-        let finalData = parsed;
-        const nulledFields: string[] = [];
-        if (options.groundToSource) {
-            try {
-                const srcIndex = buildSourceIndex(sentMarkdown);
-                finalData = groundData(parsed, srcIndex, '', nulledFields);
-            } catch {
-                // Grounding must never break extraction — fall back to ungrounded data.
-                finalData = parsed;
-                nulledFields.length = 0;
-            }
-        }
-
-        results.push({
-            url: page.url, data: finalData, status: 'success',
-            error: null, errorType: null, rawResponse: raw,
-            promptTokens, completionTokens, nulledFields,
-            responseTimeMs: Date.now() - startTotal, crawlMs, llmMs,
-        });
+        // LLM + parse + grounding — shared with the provided-content path.
+        results.push(await extractFromContent(page.url, page.markdown, options, systemMsg, charLimit, startTotal, crawlMs));
     }
 
     return results;

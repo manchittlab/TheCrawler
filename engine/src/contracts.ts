@@ -223,10 +223,59 @@ const DOCS_PAGE_CONTRACT: ExtractionContract = {
     ].join(' '),
 };
 
+const BRAND_CONTEXT_CONTRACT: ExtractionContract = {
+    name: 'brand-context',
+    domain: 'brand',
+    version: '2026-06-28',
+    description: 'Extracts a structured brand profile from a company website (homepage/about) for AI content generation — name, tagline, what they do, tone/voice, products, differentiators, socials. NOTE: tone/voice/summary fields are INFERRED from the visible copy + its writing style, so this contract is best used WITHOUT strict groundToSource (which would null inferred values).',
+    requiredFields: ['brandName', 'sourceUrl'],
+    schema: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['brandName', 'sourceUrl'],
+        properties: {
+            brandName: { type: ['string', 'null'], description: 'Company/brand name as it presents itself on the page.' },
+            tagline: { type: ['string', 'null'], description: 'Short hero tagline/slogan, verbatim if present.' },
+            oneLineDescription: { type: ['string', 'null'], description: 'One sentence ("We help X do Y") summarized from visible copy.' },
+            whatWeDo: { type: ['string', 'null'], description: '1-2 sentences on what the company does, from the page copy.' },
+            companyDescription: { type: ['string', 'null'], description: 'Longer about/description (up to ~400 chars) from visible copy.' },
+            targetAudience: { type: ['string', 'null'], description: 'Who it is for, if stated or clearly implied by visible copy.' },
+            industryCategory: { type: ['string', 'null'], description: 'Industry/category (e.g. SaaS, fintech, e-commerce, agency).' },
+            brandTone: { type: ['string', 'null'], description: 'Overall tone in a few words (e.g. "professional, playful, direct"), inferred from the copy style.' },
+            voiceAdjectives: { type: 'array', items: { type: 'string' }, description: '3-6 adjectives describing the brand voice, inferred from the writing style.' },
+            keyProductsOrServices: { type: 'array', items: { type: 'string' }, description: 'Named products/services visible on the page.' },
+            keyDifferentiators: { type: 'array', items: { type: 'string' }, description: 'Stated value propositions / differentiators from visible copy.' },
+            socialLinks: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['twitter', 'linkedin', 'instagram', 'facebook', 'youtube'],
+                properties: {
+                    twitter: { type: ['string', 'null'] },
+                    linkedin: { type: ['string', 'null'] },
+                    instagram: { type: ['string', 'null'] },
+                    facebook: { type: ['string', 'null'] },
+                    youtube: { type: ['string', 'null'] },
+                },
+            },
+            sourceUrl: { type: ['string', 'null'], description: 'The input or canonical URL that was extracted.' },
+            evidenceNotes: { type: 'array', items: { type: 'string' }, description: 'Short notes on what was visible, missing, or heavily inferred.' },
+        },
+    },
+    prompt: [
+        'Extract a structured brand profile for AI content generation from the page content.',
+        'brandName, tagline, named products/services, and social links must come ONLY from visible content.',
+        'oneLineDescription, whatWeDo, companyDescription, brandTone, voiceAdjectives, targetAudience, and industryCategory may be summarized or inferred FROM the visible copy and its writing style — never from outside/world knowledge.',
+        'brandTone and voiceAdjectives describe HOW the site is written; keep them grounded in the actual copy.',
+        'Use null (or empty arrays) when a field cannot be determined from the content. Do not invent company facts.',
+        'Set sourceUrl to the input or canonical URL. Use evidenceNotes to flag anything missing or heavily inferred.',
+    ].join(' '),
+};
+
 const CONTRACTS = new Map<string, ExtractionContract>([
     [DOCS_PAGE_CONTRACT.name, DOCS_PAGE_CONTRACT],
     [REAL_ESTATE_LISTING_CONTRACT.name, REAL_ESTATE_LISTING_CONTRACT],
     [PRODUCT_PAGE_CONTRACT.name, PRODUCT_PAGE_CONTRACT],
+    [BRAND_CONTEXT_CONTRACT.name, BRAND_CONTEXT_CONTRACT],
 ]);
 
 export function listExtractionContracts(): string[] {

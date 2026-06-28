@@ -23,9 +23,10 @@ import { gfm } from 'turndown-plugin-gfm';
 import type { CrawlOptions, PageData, CrawlResult, BrowserAction, CrawlErrorType } from './types.js';
 import { CrawlCache, getDefaultCache } from './cache.js';
 import {
-    buildPalette, rankLogos, collectCssColors, normalizeColor, sanitizeInlineSvg,
-    isBlockedBrandHost, sameSite, type ColorHit, type LogoEntry,
+    buildPalette, rankLogosByQuality, collectCssColors, normalizeColor, sanitizeInlineSvg,
+    isBlockedBrandHost, sameSite, type ColorHit, type LogoEntry, type LogoProbe,
 } from './brand.js';
+import { safeFetch } from './ssrf.js';
 
 // Re-export types for consumers
 export type { CrawlOptions, PageData, CrawlResult, BrowserAction, CrawlErrorType } from './types.js';
@@ -280,6 +281,8 @@ function errorPage(url: string, message: string, statusCode?: number): PageData 
 // --- Brand identity helpers ---
 
 const LOGO_HINT_RE = /logo|brand/i;
+// Social/share hosts: an <img> from these in a header is a share-icon, not the logo.
+const SOCIAL_HOST_RE = /(facebook|twitter|x\.com|instagram|linkedin|youtube|youtu\.be|tiktok|pinterest|github|whatsapp|telegram|t\.me|reddit|discord)\./i;
 
 /** Recursively collect logo URLs from JSON-LD (Organization/WebSite/publisher logo, @graph). */
 function findJsonLdLogos(nodes: unknown[], depth = 0): string[] {
@@ -335,6 +338,19 @@ function extractLogoCandidates($: any, pageUrl: string, structuredData: unknown[
         if (u) cands.push({ url: u, source: 'logo-img', type: guessImageType(u), confidence: 0.7 });
     });
 
+    // Keyword-less logo (Kimi #1): the <img> inside the header/nav HOME link is almost
+    // always the logo even without a logo/brand keyword (e.g. <a href="/"><img alt="Acme">).
+    // Exclude social share-icons. Final rank is adjusted by fetched image quality later.
+    $('header a img, nav a img, [role="banner"] a img').each((_i: any, el: any) => {
+        const href = ($(el).closest('a').attr('href') || '').trim();
+        const isHome = href === '/' || href === '#' || href === '' || href === origin || href === `${origin}/` || href === pageUrl;
+        if (!isHome) return;
+        const src = $(el).attr('src') || $(el).attr('data-src') || '';
+        if (SOCIAL_HOST_RE.test(src)) return;
+        const u = abs(src);
+        if (u && !SOCIAL_HOST_RE.test(u)) cands.push({ url: u, source: 'home-link-img', type: guessImageType(u), confidence: 0.82 });
+    });
+
     $('header svg, nav svg, [role="banner"] svg, .logo svg, [class*="logo"] svg, [class*="brand"] svg').each((_i: any, el: any) => {
         if (cands.some((c) => c.source === 'header-svg')) return;
         const safe = sanitizeInlineSvg($.html($(el)));
@@ -354,7 +370,93 @@ function extractLogoCandidates($: any, pageUrl: string, structuredData: unknown[
     const ogu = abs(og);
     if (ogu) cands.push({ url: ogu, source: 'og:image', type: guessImageType(ogu), confidence: 0.3 });
 
-    return rankLogos(cands);
+    return cands;
+}
+
+const LOGO_PROBE_TIMEOUT_MS = 6000;
+const LOGO_PROBE_MAX = 6;
+
+/** HEAD-probe one logo URL (SSRF-guarded via safeFetch) for bytes + content-type. Never throws. */
+async function probeLogoMeta(url: string): Promise<LogoProbe> {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), LOGO_PROBE_TIMEOUT_MS);
+    try {
+        let bytes: number | null = null;
+        let contentType: string | null = null;
+        let ok = false;
+        try {
+            const r = await safeFetch(url, { method: 'HEAD', signal: ctrl.signal });
+            ok = r.ok;
+            const cl = r.headers.get('content-length');
+            if (cl) bytes = parseInt(cl, 10);
+            contentType = r.headers.get('content-type');
+        } catch { return { ok: false, bytes: null, contentType: null }; }
+        // Some servers reject HEAD or omit length — a 1-byte ranged GET gets headers only.
+        if (!ok || bytes == null) {
+            try {
+                const g = await safeFetch(url, { method: 'GET', headers: { Range: 'bytes=0-0' }, signal: ctrl.signal });
+                await g.body?.cancel().catch(() => {});
+                const cr = g.headers.get('content-range');
+                const m = cr ? cr.match(/\/(\d+)\s*$/) : null;
+                if (m) bytes = parseInt(m[1], 10);
+                else { const cl2 = g.headers.get('content-length'); if (cl2) bytes = parseInt(cl2, 10); }
+                ok = ok || g.ok || (g.status >= 200 && g.status < 300);
+                contentType = contentType || g.headers.get('content-type');
+            } catch { /* keep the HEAD result */ }
+        }
+        return { ok, bytes: Number.isFinite(bytes as number) ? bytes : null, contentType };
+    } finally { clearTimeout(t); }
+}
+
+/**
+ * Probe the strongest logo candidates (bounded count + timeout) for real size/type,
+ * then rank by confidence × fetched quality so a tiny favicon / dead URL / social
+ * card can't outrank a real wordmark. Inline-SVG (data:) candidates score without a
+ * fetch. Never throws — a failed probe just scores neutral.
+ */
+async function probeAndRankLogos(cands: LogoEntry[]): Promise<LogoEntry[]> {
+    const byPrior = [...new Map(cands.map((c) => [c.url, c])).values()].sort((a, b) => b.confidence - a.confidence);
+    const toProbe = byPrior.filter((c) => !c.url.startsWith('data:')).slice(0, LOGO_PROBE_MAX);
+    const probes = new Map<string, LogoProbe>();
+    await Promise.all(toProbe.map(async (c) => { try { probes.set(c.url, await probeLogoMeta(c.url)); } catch { /* neutral */ } }));
+    return rankLogosByQuality(cands, probes);
+}
+
+/**
+ * Fetch + parse a PWA web app manifest (SSRF-guarded) for icon candidates + theme/bg
+ * colors. The manifest often holds the highest-res logo (512px). Never throws.
+ */
+async function fetchManifest(manifestUrl: string): Promise<{ icons: LogoEntry[]; themeColorRaw: string | null; bgColorRaw: string | null }> {
+    const empty = { icons: [] as LogoEntry[], themeColorRaw: null as string | null, bgColorRaw: null as string | null };
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), LOGO_PROBE_TIMEOUT_MS);
+    try {
+        let r: Response;
+        try { r = await safeFetch(manifestUrl, { signal: ctrl.signal }); } catch { return empty; }
+        if (!r.ok) { await r.body?.cancel().catch(() => {}); return empty; }
+        const ct = (r.headers.get('content-type') || '').toLowerCase();
+        if (ct && !ct.includes('json') && !ct.includes('text')) { await r.body?.cancel().catch(() => {}); return empty; }
+        const buf = Buffer.from(await r.arrayBuffer());
+        if (buf.byteLength > 512_000) return empty; // manifests are tiny — bound pathological input
+        let m: any;
+        try { m = JSON.parse(buf.toString('utf8')); } catch { return empty; }
+        const icons: LogoEntry[] = [];
+        if (Array.isArray(m?.icons)) {
+            for (const ic of m.icons) {
+                if (!ic || typeof ic.src !== 'string') continue;
+                let u: string;
+                try { u = new URL(ic.src, manifestUrl).href; } catch { continue; }
+                const maxDim = String(ic.sizes || '').split(/\s+/).map((s: string) => parseInt(s, 10) || 0).reduce((a: number, b: number) => Math.max(a, b), 0);
+                const conf = maxDim >= 512 ? 0.88 : maxDim >= 192 ? 0.84 : 0.7;
+                icons.push({ url: u, source: 'manifest', type: guessImageType(u), confidence: conf });
+            }
+        }
+        return {
+            icons,
+            themeColorRaw: typeof m?.theme_color === 'string' ? m.theme_color : null,
+            bgColorRaw: typeof m?.background_color === 'string' ? m.background_color : null,
+        };
+    } finally { clearTimeout(t); }
 }
 
 /** Sample rendered brand colors from a live Playwright page (computed styles). */
@@ -792,10 +894,28 @@ export async function crawlStream(
             if (brandCssText) hits.push(...collectCssColors(brandCssText, 'style'));
             if (brandExtraCss) hits.push(...collectCssColors(brandExtraCss, 'stylesheet'));
             if (brandComputedHits.length) hits.push(...brandComputedHits);
-            const { themeColor, palette } = buildPalette(hits, brandThemeColorRaw);
+
+            // PWA manifest: often the highest-res logo (512px) + an explicit theme/bg color.
+            let manifestIcons: LogoEntry[] = [];
+            let manifestThemeRaw: string | null = null;
+            const manifestHref = $('link[rel="manifest"]').attr('href');
+            if (manifestHref) {
+                let manifestUrl: string | null = null;
+                try { manifestUrl = new URL(manifestHref, pageUrl).href; } catch { /* ignore bad href */ }
+                if (manifestUrl) {
+                    const mf = await fetchManifest(manifestUrl);
+                    manifestIcons = mf.icons;
+                    manifestThemeRaw = mf.themeColorRaw;
+                    if (mf.themeColorRaw) hits.push({ value: mf.themeColorRaw, source: 'manifest:theme_color', weight: 0.5 });
+                    if (mf.bgColorRaw) hits.push({ value: mf.bgColorRaw, source: 'manifest:background_color', weight: 0.3 });
+                }
+            }
+
+            const { themeColor, palette } = buildPalette(hits, brandThemeColorRaw || manifestThemeRaw);
             data.themeColor = themeColor;
             data.palette = palette;
-            data.logo = extractLogoCandidates($, pageUrl, data.structuredData);
+            const domCands = extractLogoCandidates($, pageUrl, data.structuredData);
+            data.logo = await probeAndRankLogos([...domCands, ...manifestIcons]);
         }
 
         data.responseTimeMs = Date.now() - startTime;

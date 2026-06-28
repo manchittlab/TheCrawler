@@ -20,7 +20,10 @@ export interface LogoEntry {
     url: string;
     source: string;
     type: string | null;
+    /** Source-heuristic prior (stable across runs). NOT mutated by quality ranking. */
     confidence: number;
+    /** Combined confidence × fetched-quality score after probing (set by rankLogosByQuality). Array is ordered by this. */
+    score?: number;
 }
 
 /** One observed color before normalization/grouping. */
@@ -381,6 +384,62 @@ export function rankLogos(cands: LogoEntry[]): LogoEntry[] {
     return [...seen.values()]
         .sort((a, b) => (b.confidence - a.confidence) || a.url.localeCompare(b.url))
         .slice(0, 4);
+}
+
+/** Fetched metadata for a logo candidate (null = unknown; probe may have failed). */
+export interface LogoProbe {
+    ok: boolean;
+    bytes: number | null;
+    contentType: string | null;
+}
+
+/**
+ * Quality multiplier for a logo candidate from its fetched metadata, so the
+ * source-confidence prior can't let a 16×16 favicon, a dead URL, or a non-image
+ * outrank a real wordmark. Unknown metadata → near-neutral (never punish a failed
+ * probe hard). Pure + deterministic.
+ */
+export function scoreLogoQuality(entry: LogoEntry, probe: LogoProbe | undefined): number {
+    // data: URI (inline SVG) is vector + already in hand — strongest, no fetch needed.
+    if (entry.url.startsWith('data:')) return 1.3;
+    // A REMOTE svg/vector link earns the vector bonus ONLY if it actually probed OK —
+    // a dead .svg must not outrank a live raster wordmark (Kimi catch).
+    if (entry.type === 'svg') return (probe && probe.ok) ? 1.3 : 0.85;
+    if (!probe || !probe.ok) return 0.85; // probe failed/skipped → mild discount, keep the prior
+    const ct = (probe.contentType || '').toLowerCase();
+    if (ct && !ct.startsWith('image/')) return 0.2; // HTML/redirect page, not an image
+    let f = 1.0;
+    const b = probe.bytes;
+    if (b != null) {
+        if (b < 300) f *= 0.3;            // favicon-tiny / 1×1 tracking pixel
+        else if (b < 1000) f *= 0.7;
+        else if (b <= 500_000) f *= 1.25; // healthy logo size
+        else if (b <= 2_000_000) f *= 0.9;
+        else f *= 0.5;                     // too big — likely a photo/hero, not a logo
+    }
+    if (ct.includes('svg')) f *= 1.3;
+    else if (ct.includes('png') || ct.includes('webp')) f *= 1.15;
+    else if (ct.includes('x-icon') || ct.includes('vnd.microsoft.icon')) f *= 0.6;
+    return f;
+}
+
+/**
+ * Final logo ranking: confidence × fetched-quality, dedupe by URL, top 4. The
+ * returned `confidence` is the combined score so consumers see the adjusted order.
+ */
+export function rankLogosByQuality(cands: LogoEntry[], probes: Map<string, LogoProbe>): LogoEntry[] {
+    const deduped = new Map<string, LogoEntry>();
+    for (const c of cands) {
+        if (!c.url) continue;
+        const ex = deduped.get(c.url);
+        if (!ex || c.confidence > ex.confidence) deduped.set(c.url, c);
+    }
+    return [...deduped.values()]
+        .map((c) => ({ c, score: c.confidence * scoreLogoQuality(c, probes.get(c.url)) }))
+        .sort((a, b) => (b.score - a.score) || a.c.url.localeCompare(b.c.url))
+        .slice(0, 4)
+        // Preserve source `confidence`; expose the combined ranking value as `score`.
+        .map((x) => ({ ...x.c, score: Number(x.score.toFixed(3)) }));
 }
 
 // --- SSRF guards (used before fetching linked stylesheets / brand assets) ---
