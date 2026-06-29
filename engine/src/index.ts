@@ -24,6 +24,8 @@
 
 export { crawl, crawlStream, parseSitemap, CrawlCache } from './engine.js';
 export { extract } from './extract.js';
+export { buildEmbeddingRequests, parseEmbeddingResponse, embedTexts, embedMarkdown } from './embeddings.js';
+export type { EmbeddingConfig, EmbeddingRequest, EmbedResult } from './embeddings.js';
 export { attachContractValidation, getExtractionContract, listExtractionContracts, validateContractData } from './contracts.js';
 export { diagnoseContractReadiness, renderContractDiagnosticReport, summarizeContractDiagnostics } from './diagnostics.js';
 export type { CrawlOptions, PageData, CrawlResult, BrowserAction, CrawlErrorType, CacheOptions } from './types.js';

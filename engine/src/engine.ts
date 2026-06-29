@@ -83,7 +83,7 @@ function classifyError(message: string | undefined, statusCode?: number): { type
 }
 
 // --- Chunking ---
-function chunkText(text: string, chunkSize: number, overlap: number) {
+export function chunkText(text: string, chunkSize: number, overlap: number) {
     if (!text || chunkSize <= 0) return [];
     const chunks: { text: string; index: number; section: string | null; charCount: number; hash: string }[] = [];
     const sections = text.split(/(?=^#{1,3}\s)/m);
