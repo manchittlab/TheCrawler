@@ -39,7 +39,10 @@ export interface CrawlOptions {
     urls?: string[];
     searchQuery?: string;
     searchLimit?: number;
+    /** SerpAPI key (legacy). Prefer serperApiKey (Serper.dev — the cheaper default). */
     serpApiKey?: string;
+    /** Serper.dev API key for Google search. Overrides the SERPER_API_KEY / SERPER_DEV_KEY / THECRAWLER_SERPER_KEY env vars. */
+    serperApiKey?: string;
     sitemapUrl?: string;
     extractText?: boolean;
     extractLinks?: boolean;

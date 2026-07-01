@@ -73,7 +73,12 @@ function classifyError(message: string | undefined, statusCode?: number): { type
     const m = (message || '').toLowerCase();
     if (statusCode === 429 || m.includes('429') || m.includes('too many requests')) return { type: 'rate-limit', retryable: true };
     if (statusCode && statusCode >= 500 && statusCode < 600) return { type: 'http-5xx', retryable: true };
-    if (statusCode === 403 || m.includes('cloudflare') || m.includes('access denied') || m.includes('attention required') || m.includes('akamai')) return { type: 'blocked-bot', retryable: false };
+    // Anti-bot block. Crawlee surfaces exhausted blocks as "Request blocked - received 403 status code"
+    // (statusCode is often not propagated to the failed handler), so match the message too — else a
+    // real block gets misfiled as 'timeout'/'unknown'. Checked before the timeout branch so it wins.
+    if (statusCode === 403 || m.includes('403') || m.includes('request blocked') || m.includes('blocked')
+        || m.includes('cloudflare') || m.includes('access denied') || m.includes('attention required')
+        || m.includes('akamai') || m.includes('perimeterx') || m.includes('datadome') || m.includes('captcha')) return { type: 'blocked-bot', retryable: false };
     if (statusCode && statusCode >= 400 && statusCode < 500) return { type: 'http-4xx', retryable: false };
     if (m.includes('enotfound') || m.includes('dns')) return { type: 'dns', retryable: false };
     if (m.includes('timeout') || m.includes('etimedout')) return { type: 'timeout', retryable: true };
@@ -115,7 +120,39 @@ function matchGlob(url: string, pattern: string): boolean {
 }
 
 // --- Search ---
-async function searchGoogle(query: string, limit: number, serpApiKey?: string, log?: { info: any; error: any }): Promise<string[]> {
+/**
+ * Resolve the top result URLs for a query. Provider precedence:
+ *   1. Serper.dev (the project default — cheaper) — key from arg or
+ *      SERPER_API_KEY / SERPER_DEV_KEY / THECRAWLER_SERPER_KEY env.
+ *   2. SerpAPI — key from arg or SERPAPI_KEY / THECRAWLER_SERPAPI_KEY env.
+ *   3. Fragile Google-HTML scrape (usually blocked now) — last resort.
+ * Reading the key from env is what makes search work in MCP/CLI/server without
+ * threading it through every call (the bug: the MCP passed no key → HTML scrape → 0).
+ */
+export async function searchGoogle(query: string, limit: number, keys?: { serpApiKey?: string; serperApiKey?: string }, log?: { info: any; error: any }): Promise<string[]> {
+    const serper = keys?.serperApiKey || process.env.SERPER_API_KEY || process.env.SERPER_DEV_KEY || process.env.THECRAWLER_SERPER_KEY;
+    if (serper) {
+        try {
+            const r = await fetch('https://google.serper.dev/search', {
+                method: 'POST',
+                headers: { 'X-API-KEY': serper, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ q: query, num: Math.min(limit + 2, 20) }),
+                signal: AbortSignal.timeout(15000),
+            });
+            if (!r.ok) throw new Error(`Serper HTTP ${r.status}`);
+            const data = await r.json() as { organic?: Array<{ link?: unknown }> };
+            const urls: string[] = [];
+            for (const item of data.organic || []) {
+                if (typeof item.link === 'string' && /^https?:\/\//i.test(item.link)) urls.push(item.link);
+                if (urls.length >= limit) break;
+            }
+            return urls;
+        } catch (e: any) {
+            log?.error?.(`Serper.dev search failed: ${e?.message || e}`);
+            return [];
+        }
+    }
+    const serpApiKey = keys?.serpApiKey || process.env.SERPAPI_KEY || process.env.THECRAWLER_SERPAPI_KEY;
     if (serpApiKey) {
         const require2 = createRequire(import.meta.url);
         const { getJson } = require2('google-search-results-nodejs');
@@ -126,7 +163,7 @@ async function searchGoogle(query: string, limit: number, serpApiKey?: string, l
             });
         });
     }
-    log?.info(`No SerpAPI key — falling back to Google HTML scrape (fragile, may break when Google changes their HTML)`);
+    log?.info(`No search API key (set SERPER_API_KEY / THECRAWLER_SERPER_KEY, or SERPAPI_KEY) — falling back to Google HTML scrape (fragile, usually blocked)`);
     const encoded = encodeURIComponent(query);
     const res = await fetch(`https://www.google.com/search?q=${encoded}&num=${limit}`, {
         headers: { 'User-Agent': pickUserAgent() },
@@ -286,8 +323,14 @@ function emptyPage(url: string, overrides: Partial<PageData> = {}): PageData {
 /** Build a PageData representing a failed fetch, with classified error fields. */
 function errorPage(url: string, message: string, statusCode?: number): PageData {
     const { type, retryable } = classifyError(message, statusCode);
+    // Make an anti-bot block ACTIONABLE instead of a bare 403: enterprise-protected sites
+    // (Trustpilot, G2, Yelp, Glassdoor…) block plain fetch AND headless Chromium alike — the
+    // real fix is a residential proxy. Lighter blocks often pass with a real browser.
+    const error = type === 'blocked-bot'
+        ? `${message} — blocked by anti-bot. Try usePlaywright:true for lighter protection; hard-protected sites (Trustpilot, G2, Yelp) need a residential proxy — pass proxyUrl.`
+        : message;
     return emptyPage(url, {
-        error: message,
+        error,
         errorType: type,
         errorRetryable: retryable,
         statusCode: statusCode ?? 0,
@@ -602,7 +645,7 @@ export async function crawlStream(
 
     const {
         urls: inputUrls = [],
-        searchQuery, searchLimit = 10, serpApiKey,
+        searchQuery, searchLimit = 10, serpApiKey, serperApiKey,
         sitemapUrl,
         extractText = true, extractLinks = true, extractImages = true,
         extractMeta = true, extractHeadings = true, extractTables = true,
@@ -636,8 +679,10 @@ export async function crawlStream(
     // Resolve URLs from search or sitemap
     let urls = [...inputUrls];
     if (searchQuery && urls.length === 0) {
-        log.info(`Searching: "${searchQuery}" (limit: ${searchLimit})${serpApiKey ? ' via SerpAPI' : ''}`);
-        urls = await searchGoogle(searchQuery, searchLimit, serpApiKey, log);
+        const serperEnv = serperApiKey || process.env.SERPER_API_KEY || process.env.SERPER_DEV_KEY || process.env.THECRAWLER_SERPER_KEY;
+        const provider = serperEnv ? 'Serper.dev' : (serpApiKey || process.env.SERPAPI_KEY || process.env.THECRAWLER_SERPAPI_KEY) ? 'SerpAPI' : 'HTML-scrape(fragile)';
+        log.info(`Searching: "${searchQuery}" (limit: ${searchLimit}) via ${provider}`);
+        urls = await searchGoogle(searchQuery, searchLimit, { serpApiKey, serperApiKey }, log);
         log.info(`Found ${urls.length} URLs`);
         if (urls.length === 0) return 0;
     }

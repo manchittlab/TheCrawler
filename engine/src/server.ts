@@ -387,6 +387,7 @@ const server = createServer(async (req, res) => {
             const result = await crawl({
                 searchQuery: body.query,
                 searchLimit: body.limit ?? 5,
+                serperApiKey: body.serperKey, // env SERPER_API_KEY/THECRAWLER_SERPER_KEY used if unset
                 serpApiKey: body.serpApiKey,
                 extractMarkdown: body.extractMarkdown ?? false,
             });

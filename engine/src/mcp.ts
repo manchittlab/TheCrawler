@@ -10,7 +10,7 @@
  * the LLM can branch on failures instead of regex-matching strings.
  *
  * Setup in Claude Code:
- *   claude mcp add thecrawler node /path/to/TheCrawler/engine/dist/mcp.js
+ *   claude mcp add thecrawler node /path/to/the-crawler-standalone/dist/mcp.js
  *
  * Setup in settings.json:
  *   "mcpServers": {
@@ -127,14 +127,15 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         },
         {
             name: 'search_and_crawl',
-            description: 'Search Google for a query, then scrape the top N results. Returns structured data per result page. Without a SerpAPI key, falls back to scraping Google\'s HTML — fragile, can break when Google updates their HTML. For production agent use, supply serpApiKey.',
+            description: 'Search Google for a query, then scrape the top N results. Returns structured data per result page. Uses Serper.dev if a key is set (arg serperKey, or env SERPER_API_KEY / THECRAWLER_SERPER_KEY), else SerpAPI (serpApiKey / SERPAPI_KEY), else a fragile Google-HTML scrape that is usually blocked (returns 0). For real use, set a Serper key.',
             inputSchema: {
                 type: 'object' as const,
                 properties: {
                     query: { type: 'string', description: 'Google search query' },
                     limit: { type: 'number', description: 'How many top results to scrape', default: 5 },
                     extractMarkdown: { type: 'boolean', description: 'Also extract markdown for each result', default: false },
-                    serpApiKey: { type: 'string', description: 'SerpAPI key (recommended for reliable search). Without it, falls back to fragile HTML scrape.' },
+                    serperKey: { type: 'string', description: 'Serper.dev API key (recommended). Overrides SERPER_API_KEY / THECRAWLER_SERPER_KEY env.' },
+                    serpApiKey: { type: 'string', description: 'SerpAPI key (legacy alternative to serperKey). Overrides SERPAPI_KEY env.' },
                 },
                 required: ['query'],
             },
@@ -240,6 +241,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 const result = await crawl({
                     searchQuery: args?.query as string,
                     searchLimit: args?.limit as number ?? 5,
+                    serperApiKey: args?.serperKey as string | undefined, // env SERPER_API_KEY/THECRAWLER_SERPER_KEY used if unset
                     serpApiKey: args?.serpApiKey as string | undefined,
                     extractMarkdown: args?.extractMarkdown as boolean ?? false,
                     logger: silentLogger,

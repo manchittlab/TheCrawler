@@ -1,6 +1,6 @@
 {
     "name": "thecrawler",
-    "version": "0.5.7",
+    "version": "0.5.8",
     "mcpName": "io.github.manchittlab/thecrawler",
     "description": "Web scraper + validated extraction contracts for AI agents. Markdown, PDF/DOCX, JSON-LD/microdata/commerce/forms/analytics, structured errors, diagnostics, and LLM extraction to any OpenAI-compatible endpoint.",
     "type": "module",

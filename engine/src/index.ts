@@ -22,12 +22,14 @@
  *   console.log(r[0].data); // { name: '...', price: ... }
  */
 
-export { crawl, crawlStream, parseSitemap, CrawlCache } from './engine.js';
+export { crawl, crawlStream, parseSitemap, CrawlCache, searchGoogle } from './engine.js';
 export { extract } from './extract.js';
 export { buildEmbeddingRequests, parseEmbeddingResponse, embedTexts, embedMarkdown } from './embeddings.js';
 export type { EmbeddingConfig, EmbeddingRequest, EmbedResult } from './embeddings.js';
 export { attachContractValidation, getExtractionContract, listExtractionContracts, validateContractData } from './contracts.js';
 export { diagnoseContractReadiness, renderContractDiagnosticReport, summarizeContractDiagnostics } from './diagnostics.js';
+export { proposeFieldsFromPage, discoverFields } from './discover.js';
+export type { DiscoveredField, DiscoverResult, FieldSource } from './discover.js';
 export type { CrawlOptions, PageData, CrawlResult, BrowserAction, CrawlErrorType, CacheOptions } from './types.js';
 export type { ExtractOptions, ExtractResult, ExtractErrorType, LlmConfig } from './extract.js';
 export type { ContractExtractResult, ContractValidationResult, ExtractionContract } from './contracts.js';

@@ -302,6 +302,7 @@ export async function handleMcpToolCall(name: string, args: Record<string, unkno
                 const result = await crawl({
                     searchQuery: args.query as string,
                     searchLimit: args.limit as number ?? 5,
+                    serperApiKey: args.serperKey as string | undefined, // env SERPER_API_KEY/THECRAWLER_SERPER_KEY used if unset
                     serpApiKey: args.serpApiKey as string | undefined,
                     extractMarkdown: args.extractMarkdown as boolean ?? false,
                     logger: silentLogger,
